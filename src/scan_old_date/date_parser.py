@@ -14,10 +14,17 @@ class ParsedDate:
     ambiguous: bool = False
 
 
-_PATTERNS = [
-    re.compile(r"(?<!\d)(20\d{2}|19\d{2})[./_\- ](\d{1,2})[./_\- ](\d{1,2})(?!\d)"),
-    re.compile(r"(?<!\d)(\d{1,2})[./_\- ](\d{1,2})[./_\- ](\d{2}|\d{4})(?!\d)"),
-]
+# ISO-like year-first and common month/day/year forms.
+_YEAR_FIRST = re.compile(
+    r"(?<!\d)(20\d{2}|19\d{2})[./_\- ](\d{1,2})[./_\- ](\d{1,2})(?!\d)"
+)
+_DAY_FIRST = re.compile(
+    r"(?<!\d)(\d{1,2})[./_\- ](\d{1,2})[./_\- ](\d{2}|\d{4})(?!\d)"
+)
+# Common compact LED camera stamp: M D 'YY, M-D-YY or M D YY.
+_LED_STAMP = re.compile(
+    r"(?<!\d)(\d{1,2})[ ./_-]+(\d{1,2})\s*['’]?\s*(\d{2})(?!\d)"
+)
 
 
 def parse_date_candidates(
@@ -25,34 +32,71 @@ def parse_date_candidates(
 ) -> list[ParsedDate]:
     cleaned = text.replace("O", "0").replace("o", "0").replace("I", "1").replace("l", "1")
     found: list[ParsedDate] = []
-    for match in _PATTERNS[0].finditer(cleaned):
-        year, month, day = map(int, match.groups())
-        _append(found, year, month, day, match.group(), 0.94, min_year, max_year)
 
-    for match in _PATTERNS[1].finditer(cleaned):
+    for match in _YEAR_FIRST.finditer(cleaned):
+        year, month, day = map(int, match.groups())
+        _append(found, year, month, day, match.group(), 0.96, min_year, max_year)
+
+    # Avoid parsing the same substring twice as both a generic and LED pattern.
+    led_spans: set[tuple[int, int]] = set()
+    for match in _LED_STAMP.finditer(cleaned):
+        first, second, year_raw = map(int, match.groups())
+        year = _expand_year(year_raw)
+        led_spans.add(match.span())
+        _add_month_day_interpretations(
+            found, first, second, year, match.group(), 0.78, min_year, max_year
+        )
+
+    for match in _DAY_FIRST.finditer(cleaned):
+        if any(start <= match.start() and match.end() <= end for start, end in led_spans):
+            continue
         first, second, year_raw = match.groups()
-        first, second = int(first), int(second)
-        year = int(year_raw)
-        if year < 100:
-            year += 2000 if year <= 30 else 1900
-        # If both month/day orders are valid and differ, do not silently choose.
-        interpretations: list[date] = []
-        for month, day in ((first, second), (second, first)):
-            try:
-                candidate = date(year, month, day)
-            except ValueError:
-                continue
-            if min_year <= year <= max_year and candidate not in interpretations:
-                interpretations.append(candidate)
-        if len(interpretations) == 1:
-            found.append(ParsedDate(interpretations[0], 0.82, match.group(), False))
-        elif len(interpretations) > 1:
-            found.extend(ParsedDate(item, 0.48, match.group(), True) for item in interpretations)
+        _add_month_day_interpretations(
+            found, int(first), int(second), _expand_year(int(year_raw)),
+            match.group(), 0.82, min_year, max_year
+        )
 
     unique: dict[tuple[date, str], ParsedDate] = {}
     for item in found:
-        unique[(item.value, item.source_text)] = item
+        current = unique.get((item.value, item.source_text))
+        if current is None or item.confidence > current.confidence:
+            unique[(item.value, item.source_text)] = item
     return sorted(unique.values(), key=lambda item: item.confidence, reverse=True)
+
+
+def _expand_year(year: int) -> int:
+    if year < 100:
+        return year + (2000 if year <= 30 else 1900)
+    return year
+
+
+def _add_month_day_interpretations(
+    output: list[ParsedDate],
+    first: int,
+    second: int,
+    year: int,
+    source: str,
+    confidence: float,
+    min_year: int,
+    max_year: int,
+) -> None:
+    if not min_year <= year <= max_year:
+        return
+    interpretations: list[date] = []
+    for month, day in ((first, second), (second, first)):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            continue
+        if candidate not in interpretations:
+            interpretations.append(candidate)
+    if len(interpretations) == 1:
+        output.append(ParsedDate(interpretations[0], confidence, source, False))
+    elif len(interpretations) > 1:
+        output.extend(
+            ParsedDate(item, min(0.50, confidence), source, True)
+            for item in interpretations
+        )
 
 
 def _append(
@@ -75,10 +119,12 @@ def _append(
 
 def best_unambiguous(candidates: Iterable[ParsedDate]) -> ParsedDate | None:
     items = list(candidates)
-    if not items:
+    if not items or items[0].ambiguous:
         return None
-    if items[0].ambiguous:
-        return None
-    if len(items) > 1 and items[0].value != items[1].value and items[0].confidence - items[1].confidence < 0.15:
+    if (
+        len(items) > 1
+        and items[0].value != items[1].value
+        and items[0].confidence - items[1].confidence < 0.15
+    ):
         return None
     return items[0]
