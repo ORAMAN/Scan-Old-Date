@@ -4,7 +4,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
@@ -16,6 +16,32 @@ from .metadata import apply_date
 from .scanner import PhotoScanner
 
 
+class ScanWorker(QThread):
+    result_ready = Signal(object, str, object)
+    scan_finished = Signal(int)
+    scan_error = Signal(str)
+
+    def __init__(self, root: Path, config: dict):
+        super().__init__()
+        self.root = root
+        self.config = config
+
+    def run(self):
+        try:
+            scanner = PhotoScanner(self.config)
+            count = 0
+
+            def publish(result, status, confidence):
+                nonlocal count
+                count += 1
+                self.result_ready.emit(result, status, confidence)
+
+            scanner.scan(self.root, publish)
+            self.scan_finished.emit(count)
+        except Exception as exc:
+            self.scan_error.emit(str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -23,7 +49,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 780)
         self.config = load_config()
         self.row_meta: list[dict] = []
-        self._loading_table = False
+        self.worker: ScanWorker | None = None
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -58,7 +84,9 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self.on_item_changed)
         layout.addWidget(self.table, 1)
-        self.status = QLabel("Готово. Сначала выполните Dry Run. Дату можно исправить прямо в таблице.")
+        self.status = QLabel(
+            "Готово. Сначала выполните Dry Run. Дату можно исправить прямо в таблице."
+        )
         layout.addWidget(self.status)
         self.setCentralWidget(central)
 
@@ -72,53 +100,68 @@ class MainWindow(QMainWindow):
         if not root.is_dir():
             QMessageBox.warning(self, "Scan-Old-Date", "Выберите существующую папку.")
             return
-        self.scan_button.setEnabled(False)
         self.table.setRowCount(0)
         self.row_meta.clear()
-        self._loading_table = True
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            scanner = PhotoScanner(self.config)
+        self.scan_button.setEnabled(False)
+        self.status.setText("Сканирование выполняется…")
+        self.worker = ScanWorker(root, self.config)
+        self.worker.result_ready.connect(self.add_result)
+        self.worker.scan_finished.connect(self.scan_finished)
+        self.worker.scan_error.connect(self.scan_error)
+        self.worker.start()
 
-            def add_row(result, status, confidence):
-                candidate = result.candidates[0] if result.candidates else None
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(result.path))
-                date_item = QTableWidgetItem(candidate.value.isoformat() if candidate else "")
-                date_item.setFlags(date_item.flags() | Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(row, 1, date_item)
-                self.table.setItem(
-                    row, 2, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else "")
-                )
-                self.table.setItem(row, 3, QTableWidgetItem(status))
-                self.table.setItem(row, 4, QTableWidgetItem(", ".join(result.methods)))
-                self.row_meta.append({
-                    "confidence": float(confidence or 0.0),
-                    "ambiguous": bool(candidate.ambiguous) if candidate else True,
-                    "manual": False,
-                    "original_date": candidate.value.isoformat() if candidate else "",
-                })
+    def add_result(self, result, status: str, confidence):
+        candidate = result.candidates[0] if result.candidates else None
+        existing_date = result.raw_text[0] if status == "existing-exif" and result.raw_text else ""
+        if existing_date:
+            date_text = existing_date[:10].replace(":", "-")
+        else:
+            date_text = candidate.value.isoformat() if candidate else ""
 
-            scanner.scan(root, add_row)
-            self.status.setText(
-                f"Сканирование завершено. Файлов: {self.table.rowCount()}. "
-                "Проверьте даты и исправьте ошибки непосредственно в таблице."
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Ошибка сканирования", str(exc))
-        finally:
-            self._loading_table = False
-            QApplication.restoreOverrideCursor()
-            self.scan_button.setEnabled(True)
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(result.path))
+        date_item = QTableWidgetItem(date_text)
+        if status != "existing-exif" or self.config["metadata"].get("overwrite_existing", False):
+            date_item.setFlags(date_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        else:
+            date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, 1, date_item)
+        self.table.setItem(
+            row, 2, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else "")
+        )
+        self.table.setItem(row, 3, QTableWidgetItem(status))
+        self.table.setItem(row, 4, QTableWidgetItem(", ".join(result.methods)))
+        self.row_meta.append({
+            "confidence": float(confidence or 0.0),
+            "ambiguous": bool(candidate.ambiguous) if candidate else True,
+            "manual": False,
+            "original_date": date_text,
+            "existing_exif": status == "existing-exif",
+        })
+
+    def scan_finished(self, count: int):
+        self.scan_button.setEnabled(True)
+        self.status.setText(
+            f"Сканирование завершено. Файлов: {count}. "
+            "Проверьте распознанные даты и выберите строки для применения."
+        )
+        self.worker = None
+
+    def scan_error(self, message: str):
+        self.scan_button.setEnabled(True)
+        self.status.setText("Ошибка сканирования.")
+        QMessageBox.critical(self, "Ошибка сканирования", message)
+        self.worker = None
 
     def on_item_changed(self, item):
-        if self._loading_table or item.column() != 1:
+        if item.column() != 1:
             return
         row = item.row()
         if row < len(self.row_meta):
-            self.row_meta[row]["manual"] = item.text().strip() != self.row_meta[row]["original_date"]
-            if self.row_meta[row]["manual"]:
+            meta = self.row_meta[row]
+            meta["manual"] = item.text().strip() != meta["original_date"]
+            if meta["manual"]:
                 self.table.item(row, 3).setText("manual-review")
 
     def apply_selected(self):
@@ -133,8 +176,10 @@ class MainWindow(QMainWindow):
             return
         prepared = []
         for row in selected:
-            text = self.table.item(row, 1).text().strip()
             meta = self.row_meta[row]
+            if meta["existing_exif"] and not self.config["metadata"].get("overwrite_existing", False):
+                continue
+            text = self.table.item(row, 1).text().strip()
             try:
                 parsed = date.fromisoformat(text)
             except ValueError:
@@ -151,7 +196,7 @@ class MainWindow(QMainWindow):
         if not prepared:
             QMessageBox.information(
                 self, "Scan-Old-Date",
-                "Нет готовых дат. Исправьте дату вручную или проверьте порог уверенности."
+                "Нет готовых дат. Исправьте дату вручную или проверьте настройки перезаписи EXIF."
             )
             return
         answer = QMessageBox.question(
