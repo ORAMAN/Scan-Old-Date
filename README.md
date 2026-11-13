@@ -29,7 +29,7 @@
 ## Требования
 
 - Windows 10/11 x64
-- Python 3.11 или новее
+- Python 3.12 x64 (поддерживаются Python 3.11–3.13 x64)
 - ExifTool (рекомендуется для надёжной записи метаданных)
 - Tesseract OCR (для локального OCR)
 - Ollama с vision-моделью (по умолчанию используется локальный fallback `gemma4:12b`; если Ollama или модель не найдены, fallback пропускается)
@@ -37,10 +37,10 @@
 
 ## Установка
 
-1. Установите Python 3.11+.
+1. Установите Python 3.12 x64 с официального сайта Python. Не используйте 32-bit сборку.
 2. Установите [ExifTool](https://exiftool.org/) и [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki).
 3. Для гибридного распознавания установите [Ollama](https://ollama.com/) и загрузите vision-модель. В конфигурации по умолчанию указана `gemma4:12b`; при необходимости замените её на установленную у вас модель или задайте `ollama.enabled: false`.
-4. Запустите `install.bat`.
+4. Запустите `install.bat`. Установщик использует бинарные wheels для Pillow, OpenCV и PySide6; сборка этих библиотек из исходников не требуется.
 5. Настройте `config/settings.yaml`.
 6. Запустите `run.bat`.
 
