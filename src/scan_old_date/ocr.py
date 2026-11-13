@@ -46,11 +46,11 @@ class HybridRecognizer:
 
         for region in regions:
             try:
-                text = self._tesseract(region)
+                text, ocr_confidence = self._tesseract(region)
                 if text.strip():
                     raw_text.append(text.strip())
                     methods.append("tesseract")
-                    candidates.extend(self._parse(text))
+                    candidates.extend(self._score_candidates(self._parse(text), ocr_confidence))
             except Exception as exc:
                 errors.append(f"Tesseract: {exc}")
 
@@ -58,11 +58,11 @@ class HybridRecognizer:
         if yolo_cfg.get("enabled"):
             try:
                 for region in self._yolo_regions(path, yolo_cfg):
-                    text = self._tesseract(region)
+                    text, ocr_confidence = self._tesseract(region)
                     if text.strip():
                         raw_text.append(text.strip())
                         methods.append("yolo+tesseract")
-                        candidates.extend(self._parse(text))
+                        candidates.extend(self._score_candidates(self._parse(text), ocr_confidence))
             except Exception as exc:
                 errors.append(f"YOLO: {exc}")
 
@@ -76,21 +76,23 @@ class HybridRecognizer:
                     if text and text.upper() != "NONE":
                         raw_text.append(text)
                         methods.append("ollama-vision")
-                        candidates.extend(self._parse(text))
+                        candidates.extend(
+                            ParsedDate(
+                                item.value,
+                                min(0.75, item.confidence),
+                                item.source_text,
+                                item.ambiguous,
+                            )
+                            for item in self._parse(text)
+                        )
                 elif self.ollama_available is False:
                     errors.append("Ollama is not reachable; vision fallback skipped.")
             except Exception as exc:
                 errors.append(f"Ollama: {exc}")
 
-        counts: dict[object, int] = {}
-        for item in candidates:
-            counts[item.value] = counts.get(item.value, 0) + 1
         ranked = sorted(
             candidates,
-            key=lambda item: (
-                item.confidence + min(0.12, (counts[item.value] - 1) * 0.06),
-                not item.ambiguous,
-            ),
+            key=lambda item: (item.confidence, not item.ambiguous),
             reverse=True,
         )
         return RecognitionResult(str(path), ranked, raw_text, sorted(set(methods)), errors)
@@ -102,7 +104,21 @@ class HybridRecognizer:
             int(self.config["scan"]["max_year"]),
         )
 
-    def _tesseract(self, region: CandidateRegion) -> str:
+    @staticmethod
+    def _score_candidates(
+        candidates: list[ParsedDate], ocr_confidence: float
+    ) -> list[ParsedDate]:
+        return [
+            ParsedDate(
+                item.value,
+                min(0.99, item.confidence * ocr_confidence),
+                item.source_text,
+                item.ambiguous,
+            )
+            for item in candidates
+        ]
+
+    def _tesseract(self, region: CandidateRegion) -> tuple[str, float]:
         rgb = region.image
         scale = max(2, min(5, 1200 // max(1, rgb.shape[1])))
         enlarged = cv2.resize(rgb, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
