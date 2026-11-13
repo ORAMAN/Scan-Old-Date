@@ -161,7 +161,15 @@ class HybridRecognizer:
                 timeout=2,
             )
             response.raise_for_status()
-            self.ollama_available = True
+            model_names = {
+                item.get("name") or item.get("model")
+                for item in response.json().get("models", [])
+            }
+            configured_model = cfg["model"]
+            self.ollama_available = (
+                configured_model in model_names
+                or configured_model.split(":")[0] in model_names
+            )
         except requests.RequestException:
             self.ollama_available = False
         return self.ollama_available
