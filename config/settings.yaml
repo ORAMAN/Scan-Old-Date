@@ -24,7 +24,7 @@ yolo:
   confidence: 0.25
 
 ollama:
-  enabled: false
+  enabled: true
   base_url: "http://127.0.0.1:11434"
   model: "gemma4:12b"
   timeout_seconds: 45
