@@ -29,6 +29,7 @@ class HybridRecognizer:
             int(config["recognition"].get("max_candidate_regions", 12))
         )
         self.yolo_model = None
+        self.ollama_available: bool | None = None
         command = config["tesseract"].get("command", "").strip()
         if command:
             pytesseract.pytesseract.tesseract_cmd = command
@@ -70,11 +71,14 @@ class HybridRecognizer:
             not candidates or max(c.confidence for c in candidates) < 0.82
         ):
             try:
-                text = self._ollama_read(path, ollama_cfg)
-                if text and text.upper() != "NONE":
-                    raw_text.append(text)
-                    methods.append("ollama-vision")
-                    candidates.extend(self._parse(text))
+                if self._check_ollama(ollama_cfg):
+                    text = self._ollama_read(path, ollama_cfg)
+                    if text and text.upper() != "NONE":
+                        raw_text.append(text)
+                        methods.append("ollama-vision")
+                        candidates.extend(self._parse(text))
+                elif self.ollama_available is False:
+                    errors.append("Ollama is not reachable; vision fallback skipped.")
             except Exception as exc:
                 errors.append(f"Ollama: {exc}")
 
@@ -147,6 +151,20 @@ class HybridRecognizer:
                 if x2 > x1 and y2 > y1:
                     regions.append(CandidateRegion(image[y1:y2, x1:x2], "yolo", 0.85))
         return regions
+
+    def _check_ollama(self, cfg: dict) -> bool:
+        if self.ollama_available is not None:
+            return self.ollama_available
+        try:
+            response = requests.get(
+                cfg["base_url"].rstrip("/") + "/api/tags",
+                timeout=2,
+            )
+            response.raise_for_status()
+            self.ollama_available = True
+        except requests.RequestException:
+            self.ollama_available = False
+        return self.ollama_available
 
     @staticmethod
     def _ollama_read(path: str | Path, cfg: dict) -> str:
