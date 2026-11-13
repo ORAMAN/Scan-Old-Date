@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         self.worker.result_ready.connect(self.add_result)
         self.worker.scan_finished.connect(self.scan_finished)
         self.worker.scan_error.connect(self.scan_error)
+        self.worker.finished.connect(self.worker_thread_finished)
         self.worker.start()
 
     def add_result(self, result, status: str, confidence):
@@ -141,17 +142,17 @@ class MainWindow(QMainWindow):
         })
 
     def scan_finished(self, count: int):
-        self.scan_button.setEnabled(True)
         self.status.setText(
             f"Сканирование завершено. Файлов: {count}. "
             "Проверьте распознанные даты и выберите строки для применения."
         )
-        self.worker = None
 
     def scan_error(self, message: str):
-        self.scan_button.setEnabled(True)
         self.status.setText("Ошибка сканирования.")
         QMessageBox.critical(self, "Ошибка сканирования", message)
+
+    def worker_thread_finished(self):
+        self.scan_button.setEnabled(True)
         self.worker = None
 
     def on_item_changed(self, item):
