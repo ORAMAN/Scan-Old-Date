@@ -22,8 +22,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 set "PYTHON=.venv\Scripts\python.exe"
-for /f "usebackq delims=" %%V in (`"%PYTHON%" -c "import struct,sys; print(f'{sys.version_info.major}.{sys.version_info.minor} {struct.calcsize(chr(80)) * 8}-bit')"`) do set "PYINFO=%%V"
-echo Detected interpreter: %PYINFO%
+"%PYTHON%" -c "import platform,sys; print('Detected interpreter:', sys.version.split()[0], platform.architecture()[0])"
 
 "%PYTHON%" -c "import sys,struct; assert sys.version_info >= (3,11) and sys.version_info < (3,14) and struct.calcsize('P') == 8" >nul 2>nul
 if errorlevel 1 (
