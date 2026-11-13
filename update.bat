@@ -64,16 +64,25 @@ if errorlevel 1 (
   set "UV=uv"
 )
 
-if not exist ".venv\Scripts\python.exe" (
+set "RECREATE_VENV="
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "import sys,sysconfig; assert sys.version_info[:2] == (3,12) and not sysconfig.get_config_var('Py_GIL_DISABLED')"
+  if errorlevel 1 set "RECREATE_VENV=1"
+) else (
+  set "RECREATE_VENV=1"
+)
+
+if defined RECREATE_VENV (
+  echo Creating a standard CPython 3.12 environment managed by uv...
   "%UV%" python install 3.12
   if errorlevel 1 goto :error
-  "%UV%" venv --python 3.12 .venv
+  "%UV%" venv --clear --python 3.12 .venv
   if errorlevel 1 goto :error
 )
 
 echo.
 echo Synchronizing project dependencies with uv...
-"%UV%" sync --extra dev --no-build
+"%UV%" sync --extra dev --no-build-package Pillow --no-build-package opencv-python --no-build-package PySide6 --no-build-package shiboken6 --no-build-package numpy
 if errorlevel 1 goto :error
 
 ".venv\Scripts\python.exe" -c "import sys, PySide6, cv2, PIL; print('Runtime OK:', sys.version.split()[0], '| PySide6:', PySide6.__version__, '| OpenCV:', cv2.__version__, '| Pillow:', PIL.__version__)"
