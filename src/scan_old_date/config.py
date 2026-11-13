@@ -25,7 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tesseract": {"command": "", "languages": "eng", "page_segmentation_mode": 11},
     "yolo": {"enabled": False, "weights": "models/date-stamp-detector.pt", "confidence": 0.25},
     "ollama": {
-        "enabled": False,
+        "enabled": True,
         "base_url": "http://127.0.0.1:11434",
         "model": "gemma4:12b",
         "timeout_seconds": 45,
