@@ -7,13 +7,13 @@ name = "scan-old-date"
 version = "0.1.0"
 description = "Local photo date-stamp scanner and metadata writer"
 readme = "README.md"
-requires-python = ">=3.11"
-license = {text = "MIT"}
+requires-python = ">=3.11,<3.14"
+license = "MIT"
 dependencies = [
-  "Pillow>=10.3",
-  "opencv-python>=4.9",
+  "Pillow>=10.3,<13",
+  "opencv-python>=4.9,<5",
   "pytesseract>=0.3.10",
-  "PySide6>=6.7",
+  "PySide6>=6.7,<7",
   "PyYAML>=6.0",
   "requests>=2.31",
 ]
