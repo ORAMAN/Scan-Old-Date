@@ -34,11 +34,10 @@ def read_exif_date(path: str | Path, exiftool: str = "exiftool") -> str | None:
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-    # Pillow fallback keeps scanning useful even when ExifTool is not installed.
     try:
         with Image.open(path) as image:
             exif = image.getexif()
-            for tag_id in (36867, 306, 36868):  # DateTimeOriginal, DateTime, DateTimeDigitized
+            for tag_id in (36867, 306, 36868):
                 value = exif.get(tag_id)
                 if value:
                     return str(value)
@@ -56,6 +55,20 @@ def apply_date(
     metadata_cfg = config["metadata"]
     exiftool_setting = metadata_cfg.get("exiftool_path", "exiftool")
     exiftool = _resolve_exiftool(exiftool_setting)
+    write_exif = metadata_cfg.get("write_exif", True)
+
+    if write_exif and not exiftool:
+        raise RuntimeError(
+            "ExifTool не найден. Установите ExifTool или укажите полный путь "
+            "в metadata.exiftool_path."
+        )
+    if write_exif and not metadata_cfg.get("overwrite_existing", False):
+        existing = read_exif_date(path, exiftool_setting)
+        if existing:
+            raise RuntimeError(
+                f"В файле уже есть дата EXIF ({existing}); перезапись запрещена настройкой."
+            )
+
     default_time = config.get("scan", {}).get("default_time", "12:00:00")
     stamp = datetime.combine(photo_date, datetime.strptime(default_time, "%H:%M:%S").time())
     exif_value = stamp.strftime("%Y:%m:%d %H:%M:%S")
@@ -71,12 +84,7 @@ def apply_date(
         backup_path = str(backup_file)
 
     exif_written = False
-    if metadata_cfg.get("write_exif", True):
-        if not exiftool:
-            raise RuntimeError(
-                "ExifTool не найден. Установите ExifTool или укажите полный путь "
-                "в metadata.exiftool_path."
-            )
+    if write_exif:
         command = [
             exiftool,
             "-P",
@@ -94,8 +102,7 @@ def apply_date(
     file_time_set = False
     if metadata_cfg.get("set_file_times", True):
         stat = path.stat()
-        timestamp = stamp.timestamp()
-        os.utime(path, (stat.st_atime, timestamp))
+        os.utime(path, (stat.st_atime, stamp.timestamp()))
         file_time_set = True
 
     return {
