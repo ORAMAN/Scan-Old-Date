@@ -1,15 +1,18 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
+
 where git >nul 2>nul
 if errorlevel 1 (
   echo Git was not found. Install Git for Windows.
   pause
   exit /b 1
 )
+
 echo Checking repository status...
 git status --short
 if errorlevel 1 goto :error
+
 for /f %%i in ('git status --porcelain') do set LOCAL_CHANGES=1
 if defined LOCAL_CHANGES (
   echo.
@@ -33,8 +36,10 @@ if defined LOCAL_CHANGES (
     set RESTORE_STASH=1
   )
 )
+
 git pull --ff-only
 if errorlevel 1 goto :error
+
 if defined RESTORE_STASH (
   git stash pop
   if errorlevel 1 (
@@ -43,14 +48,44 @@ if defined RESTORE_STASH (
     exit /b 1
   )
 )
-if exist ".venv\Scripts\python.exe" (
-  call ".venv\Scripts\activate.bat"
-  python -m pip install -e .
+
+where uv >nul 2>nul
+if errorlevel 1 (
+  if exist "%USERPROFILE%\.local\bin\uv.exe" (
+    set "UV=%USERPROFILE%\.local\bin\uv.exe"
+  ) else if exist "%USERPROFILE%\.cargo\bin\uv.exe" (
+    set "UV=%USERPROFILE%\.cargo\bin\uv.exe"
+  ) else (
+    echo uv was not found. Run install.bat to install uv and initialize the environment.
+    pause
+    exit /b 1
+  )
+) else (
+  set "UV=uv"
 )
-echo Update completed.
+
+if not exist ".venv\Scripts\python.exe" (
+  "%UV%" python install 3.12
+  if errorlevel 1 goto :error
+  "%UV%" venv --python 3.12 .venv
+  if errorlevel 1 goto :error
+)
+
+echo.
+echo Synchronizing project dependencies with uv...
+"%UV%" sync --extra dev --no-build
+if errorlevel 1 goto :error
+
+".venv\Scripts\python.exe" -c "import sys, PySide6, cv2, PIL; print('Runtime OK:', sys.version.split()[0], '| PySide6:', PySide6.__version__, '| OpenCV:', cv2.__version__, '| Pillow:', PIL.__version__)"
+if errorlevel 1 goto :error
+
+echo.
+echo Update completed successfully.
 pause
 exit /b 0
+
 :error
-echo Update failed. Review the messages above.
+echo.
+echo Update failed. Review the messages above. The script will not report success after a failed step.
 pause
 exit /b 1
