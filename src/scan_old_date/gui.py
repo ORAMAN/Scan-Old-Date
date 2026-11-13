@@ -116,6 +116,13 @@ class MainWindow(QMainWindow):
         existing_date = result.raw_text[0] if status == "existing-exif" and result.raw_text else ""
         if existing_date:
             date_text = existing_date[:10].replace(":", "-")
+        elif candidate and candidate.ambiguous:
+            alternatives = list(dict.fromkeys(
+                item.value.isoformat()
+                for item in result.candidates
+                if item.ambiguous
+            ))
+            date_text = " / ".join(alternatives)
         else:
             date_text = candidate.value.isoformat() if candidate else ""
 
