@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
-    config = DEFAULT_CONFIG.copy()
+    config = deepcopy(DEFAULT_CONFIG)
     config_path = Path(path) if path else Path("config/settings.yaml")
     if config_path.exists():
         with config_path.open("r", encoding="utf-8") as stream:
