@@ -50,7 +50,9 @@ class HybridRecognizer:
                 if text.strip():
                     raw_text.append(text.strip())
                     methods.append("tesseract")
-                    candidates.extend(self._score_candidates(self._parse(text), ocr_confidence))
+                    candidates.extend(
+                        self._score_candidates(self._parse(text), ocr_confidence)
+                    )
             except Exception as exc:
                 errors.append(f"Tesseract: {exc}")
 
@@ -62,7 +64,9 @@ class HybridRecognizer:
                     if text.strip():
                         raw_text.append(text.strip())
                         methods.append("yolo+tesseract")
-                        candidates.extend(self._score_candidates(self._parse(text), ocr_confidence))
+                        candidates.extend(
+                            self._score_candidates(self._parse(text), ocr_confidence)
+                        )
             except Exception as exc:
                 errors.append(f"YOLO: {exc}")
 
@@ -85,8 +89,8 @@ class HybridRecognizer:
                             )
                             for item in self._parse(text)
                         )
-                elif self.ollama_available is False:
-                    errors.append("Ollama is not reachable; vision fallback skipped.")
+                else:
+                    errors.append("Ollama or the configured vision model is unavailable.")
             except Exception as exc:
                 errors.append(f"Ollama: {exc}")
 
@@ -131,17 +135,39 @@ class HybridRecognizer:
         cfg = self.config["tesseract"]
         psm = int(cfg.get("page_segmentation_mode", 11))
         lang = cfg.get("languages", "eng")
-        texts = []
+        texts: list[str] = []
+        confidence_scores: list[float] = []
+
         for image in variants:
-            config = (
+            tesseract_config = (
                 f"--oem 3 --psm {psm} "
                 "-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                 "abcdefghijklmnopqrstuvwxyz./:_-' "
             )
-            texts.append(
-                pytesseract.image_to_string(Image.fromarray(image), lang=lang, config=config)
+            data = pytesseract.image_to_data(
+                Image.fromarray(image),
+                lang=lang,
+                config=tesseract_config,
+                output_type=pytesseract.Output.DICT,
             )
-        return "\n".join(texts)
+            words: list[str] = []
+            scores: list[float] = []
+            for word, raw_confidence in zip(
+                data.get("text", []), data.get("conf", [])
+            ):
+                word = word.strip()
+                try:
+                    score = float(raw_confidence)
+                except (TypeError, ValueError):
+                    continue
+                if word and score >= 0:
+                    words.append(word)
+                    scores.append(score)
+            if words:
+                texts.append(" ".join(words))
+                confidence_scores.append(sum(scores) / len(scores) / 100.0)
+
+        return "\\n".join(texts), max(confidence_scores, default=0.0)
 
     def _yolo_regions(self, path: str | Path, cfg: dict) -> list[CandidateRegion]:
         from ultralytics import YOLO
