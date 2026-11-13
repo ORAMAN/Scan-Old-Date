@@ -1,42 +1,54 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
 
-REM PySide6 and OpenCV require a supported 64-bit CPython build.
-where py >nul 2>nul
-if errorlevel 1 (
-  echo Python Launcher was not found.
-  echo Install Python 3.12 x64 from https://www.python.org/downloads/
-  pause
-  exit /b 1
-)
+REM Locate uv. Install it with the official Astral installer when missing.
+where uv >nul 2>nul
+if not errorlevel 1 set "UV=uv"
 
-if not exist ".venv\Scripts\python.exe" (
-  py -3.12-64 -m venv .venv
+if not defined UV (
+  echo uv was not found. Installing uv from the official Astral installer...
+  where powershell >nul 2>nul
   if errorlevel 1 (
-    echo Could not create a Python 3.12 x64 environment.
-    echo Install Python 3.12 x64, enable the Python Launcher, then run this file again.
+    echo PowerShell was not found. Install uv manually: https://docs.astral.sh/uv/getting-started/installation/
     pause
     exit /b 1
   )
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+  if errorlevel 1 goto :uv_error
+
+  if exist "%USERPROFILE%\.local\bin\uv.exe" set "UV=%USERPROFILE%\.local\bin\uv.exe"
+  if exist "%USERPROFILE%\.cargo\bin\uv.exe" set "UV=%USERPROFILE%\.cargo\bin\uv.exe"
+  if not defined UV (
+    where uv >nul 2>nul
+    if not errorlevel 1 set "UV=uv"
+  )
 )
 
-set "PYTHON=.venv\Scripts\python.exe"
-"%PYTHON%" -c "import platform,sys; print('Detected interpreter:', sys.version.split()[0], platform.architecture()[0])"
+if not defined UV goto :uv_error
 
-"%PYTHON%" -c "import sys,struct; assert sys.version_info >= (3,11) and sys.version_info < (3,14) and struct.calcsize('P') == 8" >nul 2>nul
-if errorlevel 1 (
-  echo The existing .venv is not a supported 64-bit Python 3.11-3.13 environment.
-  echo Delete the .venv folder and install Python 3.12 x64, then rerun install.bat.
-  pause
-  exit /b 1
-)
+echo.
+"%UV%" --version
+if errorlevel 1 goto :uv_error
 
-"%PYTHON%" -m pip install --upgrade pip
+echo.
+echo Installing managed CPython 3.12 x64...
+"%UV%" python install 3.12
 if errorlevel 1 goto :error
 
-REM Require binary wheels for native packages: do not attempt local C++ builds.
-"%PYTHON%" -m pip install --only-binary=Pillow,opencv-python,PySide6 -e ".[dev]"
+echo.
+echo Creating a clean virtual environment with standard CPython 3.12...
+"%UV%" venv --clear --python 3.12 .venv
+if errorlevel 1 goto :error
+
+echo.
+echo Resolving and installing project dependencies with binary packages only...
+"%UV%" sync --extra dev --no-build
+if errorlevel 1 goto :error
+
+echo.
+echo Verifying the runtime and key dependencies...
+".venv\Scripts\python.exe" -c "import sys, platform, PySide6, cv2, PIL; print('Python:', sys.version); print('Architecture:', platform.architecture()[0]); print('PySide6:', PySide6.__version__); print('OpenCV:', cv2.__version__); print('Pillow:', PIL.__version__)"
 if errorlevel 1 goto :error
 
 if not exist "data" mkdir data
@@ -45,9 +57,16 @@ echo Installation completed successfully.
 pause
 exit /b 0
 
+:uv_error
+echo.
+echo Could not install or locate uv.
+echo Install it manually from https://docs.astral.sh/uv/getting-started/installation/
+pause
+exit /b 1
+
 :error
 echo.
-echo Installation failed. Check the interpreter above and the package index configuration.
-echo For PySide6/OpenCV, use official 64-bit CPython 3.12 and the public PyPI index.
+echo Installation failed. No success status is reported.
+echo Review the error above. uv uses standard CPython 3.12 and binary wheels only.
 pause
 exit /b 1
