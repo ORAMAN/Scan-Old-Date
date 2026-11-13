@@ -19,6 +19,12 @@ def test_ambiguous_month_day_is_not_auto_selected():
     assert best_unambiguous(result) is None
 
 
-def test_unambiguous_us_style_when_only_one_valid_interpretation():
+def test_unambiguous_day_first_when_first_number_exceeds_month_range():
     result = parse_date_candidates("13/04/98")
     assert result[0].value == date(1998, 4, 13)
+
+
+def test_camera_led_stamp_with_apostrophe():
+    result = parse_date_candidates("7 4 '98")
+    assert result
+    assert result[0].value == date(1998, 7, 4)
