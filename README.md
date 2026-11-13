@@ -32,14 +32,14 @@
 - Python 3.11 или новее
 - ExifTool (рекомендуется для надёжной записи метаданных)
 - Tesseract OCR (для локального OCR)
-- Ollama (необязательно, для vision fallback)
+- Ollama с vision-моделью (по умолчанию используется локальный fallback `gemma4:12b`; если Ollama или модель не найдены, fallback пропускается)
 - YOLO weights (необязательно)
 
 ## Установка
 
 1. Установите Python 3.11+.
 2. Установите [ExifTool](https://exiftool.org/) и [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki).
-3. При необходимости установите [Ollama](https://ollama.com/) и загрузите vision-модель, например совместимую с вашим локальным окружением.
+3. Для гибридного распознавания установите [Ollama](https://ollama.com/) и загрузите vision-модель. В конфигурации по умолчанию указана `gemma4:12b`; при необходимости замените её на установленную у вас модель или задайте `ollama.enabled: false`.
 4. Запустите `install.bat`.
 5. Настройте `config/settings.yaml`.
 6. Запустите `run.bat`.
@@ -66,7 +66,7 @@ python -m scan_old_date.cli "D:\Photos" --apply
 - порог автоматического принятия;
 - расширения файлов;
 - ExifTool и Tesseract;
-- параметры Ollama;
+- параметры Ollama (по умолчанию включён локальный fallback);
 - путь к YOLO weights;
 - запись EXIF и времени файла;
 - резервное копирование.
