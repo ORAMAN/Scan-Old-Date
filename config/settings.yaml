@@ -1,0 +1,41 @@
+scan:
+  recursive: true
+  extensions: [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp", ".bmp"]
+  skip_existing_exif_date: true
+  min_year: 1950
+  max_year: 2035
+  default_time: "12:00:00"
+
+recognition:
+  auto_accept_threshold: 0.90
+  review_threshold: 0.55
+  max_candidate_regions: 12
+  use_color_candidates: true
+  use_corner_candidates: true
+
+tesseract:
+  command: ""
+  languages: "eng"
+  page_segmentation_mode: 11
+
+yolo:
+  enabled: false
+  weights: "models/date-stamp-detector.pt"
+  confidence: 0.25
+
+ollama:
+  enabled: false
+  base_url: "http://127.0.0.1:11434"
+  model: "gemma4:12b"
+  timeout_seconds: 45
+
+metadata:
+  write_exif: true
+  set_file_times: true
+  backup_before_write: true
+  backup_directory: ".scan-old-date-backups"
+  overwrite_existing: false
+  exiftool_path: "exiftool"
+
+database:
+  path: "data/scan_old_date.sqlite3"
