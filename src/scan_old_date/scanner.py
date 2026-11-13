@@ -16,8 +16,16 @@ class PhotoScanner:
     def iter_images(self, root: str | Path) -> Iterator[Path]:
         root = Path(root)
         extensions = {item.lower() for item in self.config["scan"]["extensions"]}
+        excluded_names = {
+            self.config["metadata"].get("backup_directory", ".scan-old-date-backups"),
+            ".git",
+            ".venv",
+            "__pycache__",
+        }
         iterator = root.rglob("*") if self.config["scan"].get("recursive", True) else root.glob("*")
         for path in iterator:
+            if any(part in excluded_names for part in path.parts):
+                continue
             if path.is_file() and path.suffix.lower() in extensions:
                 yield path
 
@@ -30,11 +38,13 @@ class PhotoScanner:
         db = ScanDatabase(self.config["database"]["path"])
         try:
             for path in self.iter_images(root):
-                existing = read_exif_date(path, self.config["metadata"].get("exiftool_path", "exiftool"))
+                existing = read_exif_date(
+                    path, self.config["metadata"].get("exiftool_path", "exiftool")
+                )
                 if existing and self.config["scan"].get("skip_existing_exif_date", True):
-                    result = RecognitionResult(str(path), [], [], ["exif"], [])
+                    result = RecognitionResult(str(path), [], [existing], ["exif"], [])
                     status, confidence = "existing-exif", None
-                    db.add_result(str(path), existing, confidence, "", "exif", status)
+                    db.add_result(str(path), existing, confidence, existing, "exif", status)
                 else:
                     result = self.recognizer.recognize(path)
                     selected = result.candidates[0] if result.candidates else None
