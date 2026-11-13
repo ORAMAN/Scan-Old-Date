@@ -43,7 +43,7 @@ if errorlevel 1 goto :error
 
 echo.
 echo Resolving and installing project dependencies with binary packages only...
-"%UV%" sync --extra dev --no-build
+"%UV%" sync --extra dev --no-build-package Pillow --no-build-package opencv-python --no-build-package PySide6 --no-build-package shiboken6 --no-build-package numpy
 if errorlevel 1 goto :error
 
 echo.
