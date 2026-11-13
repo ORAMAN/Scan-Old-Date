@@ -6,21 +6,43 @@ import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
+from PIL import Image
+
+
+def _resolve_exiftool(exiftool: str) -> str | None:
+    candidate = Path(exiftool)
+    if candidate.is_file():
+        return str(candidate)
+    return shutil.which(exiftool)
+
 
 def read_exif_date(path: str | Path, exiftool: str = "exiftool") -> str | None:
+    executable = _resolve_exiftool(exiftool)
+    if executable:
+        try:
+            result = subprocess.run(
+                [executable, "-s3", "-DateTimeOriginal", "-CreateDate", str(path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+            for line in result.stdout.splitlines():
+                value = line.strip()
+                if value and value != "-":
+                    return value
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    # Pillow fallback keeps scanning useful even when ExifTool is not installed.
     try:
-        result = subprocess.run(
-            [exiftool, "-s3", "-DateTimeOriginal", "-CreateDate", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=20,
-        )
-        for line in result.stdout.splitlines():
-            value = line.strip()
-            if value and value != "-":
-                return value
-    except (OSError, subprocess.TimeoutExpired):
+        with Image.open(path) as image:
+            exif = image.getexif()
+            for tag_id in (36867, 306, 36868):  # DateTimeOriginal, DateTime, DateTimeDigitized
+                value = exif.get(tag_id)
+                if value:
+                    return str(value)
+    except Exception:
         pass
     return None
 
@@ -32,8 +54,9 @@ def apply_date(
 ) -> dict[str, str | bool]:
     path = Path(path)
     metadata_cfg = config["metadata"]
-    exiftool = metadata_cfg.get("exiftool_path", "exiftool")
-    default_time = metadata_cfg.get("default_time", "12:00:00")
+    exiftool_setting = metadata_cfg.get("exiftool_path", "exiftool")
+    exiftool = _resolve_exiftool(exiftool_setting)
+    default_time = config.get("scan", {}).get("default_time", "12:00:00")
     stamp = datetime.combine(photo_date, datetime.strptime(default_time, "%H:%M:%S").time())
     exif_value = stamp.strftime("%Y:%m:%d %H:%M:%S")
     backup_path = ""
@@ -49,6 +72,11 @@ def apply_date(
 
     exif_written = False
     if metadata_cfg.get("write_exif", True):
+        if not exiftool:
+            raise RuntimeError(
+                "ExifTool не найден. Установите ExifTool или укажите полный путь "
+                "в metadata.exiftool_path."
+            )
         command = [
             exiftool,
             "-P",
