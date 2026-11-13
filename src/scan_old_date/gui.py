@@ -20,9 +20,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scan-Old-Date")
-        self.resize(1180, 760)
+        self.resize(1280, 780)
         self.config = load_config()
-        self.rows: list[tuple[str, date, float, bool]] = []
+        self.row_meta: list[dict] = []
+        self._loading_table = False
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -41,7 +42,7 @@ class MainWindow(QMainWindow):
         self.dry_run.setToolTip("При включённом режиме файлы не изменяются.")
         self.scan_button = QPushButton("Сканировать")
         self.scan_button.clicked.connect(self.start_scan)
-        self.apply_button = QPushButton("Применить подтверждённые даты")
+        self.apply_button = QPushButton("Применить выбранные даты")
         self.apply_button.clicked.connect(self.apply_selected)
         controls.addWidget(self.dry_run)
         controls.addStretch(1)
@@ -50,11 +51,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(controls)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Файл", "Распознано", "Уверенность", "Статус", "Метод"])
+        self.table.setHorizontalHeaderLabels(
+            ["Файл", "Дата (редактируется)", "Уверенность", "Статус", "Метод"]
+        )
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.itemChanged.connect(self.on_item_changed)
         layout.addWidget(self.table, 1)
-        self.status = QLabel("Готово. Сначала выполните Dry Run.")
+        self.status = QLabel("Готово. Сначала выполните Dry Run. Дату можно исправить прямо в таблице.")
         layout.addWidget(self.status)
         self.setCentralWidget(central)
 
@@ -70,7 +74,8 @@ class MainWindow(QMainWindow):
             return
         self.scan_button.setEnabled(False)
         self.table.setRowCount(0)
-        self.rows.clear()
+        self.row_meta.clear()
+        self._loading_table = True
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             scanner = PhotoScanner(self.config)
@@ -80,49 +85,91 @@ class MainWindow(QMainWindow):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self.table.setItem(row, 0, QTableWidgetItem(result.path))
-                self.table.setItem(row, 1, QTableWidgetItem(candidate.value.isoformat() if candidate else ""))
-                self.table.setItem(row, 2, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else ""))
+                date_item = QTableWidgetItem(candidate.value.isoformat() if candidate else "")
+                date_item.setFlags(date_item.flags() | Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, 1, date_item)
+                self.table.setItem(
+                    row, 2, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else "")
+                )
                 self.table.setItem(row, 3, QTableWidgetItem(status))
                 self.table.setItem(row, 4, QTableWidgetItem(", ".join(result.methods)))
-                if candidate:
-                    self.rows.append((result.path, candidate.value, candidate.confidence, candidate.ambiguous))
-                else:
-                    self.rows.append((result.path, date.min, 0.0, True))
+                self.row_meta.append({
+                    "confidence": float(confidence or 0.0),
+                    "ambiguous": bool(candidate.ambiguous) if candidate else True,
+                    "manual": False,
+                    "original_date": candidate.value.isoformat() if candidate else "",
+                })
 
             scanner.scan(root, add_row)
-            self.status.setText(f"Сканирование завершено. Найдено файлов: {self.table.rowCount()}")
+            self.status.setText(
+                f"Сканирование завершено. Файлов: {self.table.rowCount()}. "
+                "Проверьте даты и исправьте ошибки непосредственно в таблице."
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка сканирования", str(exc))
         finally:
+            self._loading_table = False
             QApplication.restoreOverrideCursor()
             self.scan_button.setEnabled(True)
 
+    def on_item_changed(self, item):
+        if self._loading_table or item.column() != 1:
+            return
+        row = item.row()
+        if row < len(self.row_meta):
+            self.row_meta[row]["manual"] = item.text().strip() != self.row_meta[row]["original_date"]
+            if self.row_meta[row]["manual"]:
+                self.table.item(row, 3).setText("manual-review")
+
     def apply_selected(self):
         if self.dry_run.isChecked():
-            QMessageBox.information(self, "Dry Run", "Снимите флажок Dry Run, чтобы разрешить запись.")
+            QMessageBox.information(
+                self, "Dry Run", "Снимите флажок Dry Run, чтобы разрешить запись."
+            )
             return
         selected = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
         if not selected:
             QMessageBox.information(self, "Scan-Old-Date", "Выберите строки для применения.")
             return
+        prepared = []
+        for row in selected:
+            text = self.table.item(row, 1).text().strip()
+            meta = self.row_meta[row]
+            try:
+                parsed = date.fromisoformat(text)
+            except ValueError:
+                self.table.item(row, 3).setText("invalid-date")
+                continue
+            if not meta["manual"] and (
+                meta["ambiguous"]
+                or meta["confidence"] < float(self.config["recognition"]["auto_accept_threshold"])
+            ):
+                self.table.item(row, 3).setText("needs-review")
+                continue
+            prepared.append((row, self.table.item(row, 0).text(), parsed))
+
+        if not prepared:
+            QMessageBox.information(
+                self, "Scan-Old-Date",
+                "Нет готовых дат. Исправьте дату вручную или проверьте порог уверенности."
+            )
+            return
         answer = QMessageBox.question(
             self, "Подтверждение",
-            f"Записать даты для {len(selected)} выбранных файлов? Перед изменением будут созданы резервные копии.",
+            f"Записать даты для {len(prepared)} файлов? Перед изменением будут созданы резервные копии.",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
         done = 0
-        for row in selected:
-            path, value, confidence, ambiguous = self.rows[row]
-            if value == date.min or ambiguous or confidence < float(self.config["recognition"]["auto_accept_threshold"]):
-                continue
+        for row, path, value in prepared:
             try:
                 apply_date(path, value, self.config)
                 self.table.item(row, 3).setText("applied")
                 done += 1
             except Exception as exc:
                 self.table.item(row, 3).setText(f"error: {exc}")
-        self.status.setText(f"Применено: {done}")
+        self.status.setText(f"Применено: {done} из {len(prepared)}")
+
 
 def main():
     app = QApplication(sys.argv)
