@@ -24,9 +24,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_time": "12:00:00",
     },
     "recognition": {
-        "auto_accept_threshold": 0.90,
+        "auto_accept_threshold": 0.82,
         "review_threshold": 0.55,
-        "max_candidate_regions": 12,
+        "max_candidate_regions": 16,
         "use_color_candidates": True,
         "use_corner_candidates": True,
     },
