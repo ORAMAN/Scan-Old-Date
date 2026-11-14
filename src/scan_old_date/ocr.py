@@ -261,7 +261,7 @@ class HybridRecognizer:
         source = region.image
         source_height, source_width = source.shape[:2]
         max_dimension = max(source_height, source_width)
-        scale = max(2, min(8, 2400 // max(1, max_dimension)))
+        scale = max(2, min(10, 3000 // max(1, max_dimension)))
 
         # Side strips and tight vertical stamp proposals are tried upright first.
         aspect = source_width / max(1, source_height)
@@ -320,7 +320,7 @@ class HybridRecognizer:
                     tesseract_config = (
                         f"--oem 3 --psm {psm} "
                         "-c tessedit_char_whitelist="
-                        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./:_-"
+                        "0123456789:/.-AMPamp"
                     )
                     data = pytesseract.image_to_data(
                         Image.fromarray(image),
