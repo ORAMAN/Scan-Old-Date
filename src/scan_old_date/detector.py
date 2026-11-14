@@ -149,7 +149,19 @@ class StampDetector:
                 if 0.55 < aspect < 2.0:
                     continue
 
-                if aspect < 0.72:
+                near_side = (
+                    x < width * 0.20 or x + box_width > width * 0.80
+                )
+                near_top_or_bottom = (
+                    y < height * 0.18
+                    or y + box_height > height * 0.72
+                )
+                if not near_side or not near_top_or_bottom:
+                    continue
+                if aspect >= 2.0 and box_width < width * 0.10:
+                    continue
+
+                if aspect < 0.55:
                     # Vertical stamp: keep the narrow glyph column tight. A large
                     # side margin floods OCR with unrelated tablecloth/food pixels.
                     pad_x = max(4, int(box_width * 0.12))
