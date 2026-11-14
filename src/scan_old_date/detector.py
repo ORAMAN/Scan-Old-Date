@@ -41,7 +41,7 @@ class StampDetector:
         # Yellow/orange camera stamps are common. Join neighbouring glyphs in both
         # directions so horizontal and vertical date lines can become one proposal.
         hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-        yellow_orange = cv2.inRange(
+        yellow_raw = cv2.inRange(
             hsv,
             np.array([10, 55, 115], dtype=np.uint8),
             np.array([52, 255, 255], dtype=np.uint8),
@@ -63,7 +63,7 @@ class StampDetector:
         # than merge every yellow object in the scene, cluster small components
         # that share nearly the same X coordinate along an image edge.
         component_count, _, component_stats, component_centres = (
-            cv2.connectedComponentsWithStats(yellow_orange, 8)
+            cv2.connectedComponentsWithStats(yellow_raw, 8)
         )
         glyphs: list[tuple[int, int, int, int, float]] = []
         max_glyph_width = max(14, int(width * 0.055))
