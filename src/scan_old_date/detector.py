@@ -165,7 +165,8 @@ class StampDetector:
                     min(width, x + box_width + pad_x),
                     min(height, y + box_height + pad_y),
                 )
-                region = self._make_region(rgb, label, box, 0.84)
+                proposal_score = 0.95 if label == "yellow-stamp-horizontal" else 0.84
+                region = self._make_region(rgb, label, box, proposal_score)
                 if region is not None:
                     colour_proposals.append(region)
 
