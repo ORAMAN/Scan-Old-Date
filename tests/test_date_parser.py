@@ -52,3 +52,15 @@ def test_vertical_stamp_with_day_and_time_glued_by_ocr():
     result = parse_date_candidates("2009/06/ 1316AM")
     assert len(result) == 1
     assert result[0].value == date(2009, 6, 13)
+
+
+def test_vertical_camera_stamp_with_missing_final_m_in_am():
+    result = parse_date_candidates("2009/06/1301:36A")
+    assert result
+    assert result[0].value == date(2009, 6, 13)
+
+
+def test_camera_stamp_without_space_before_full_am_pm_time():
+    result = parse_date_candidates("2009/08/0704:57PM")
+    assert result
+    assert result[0].value == date(2009, 8, 7)
