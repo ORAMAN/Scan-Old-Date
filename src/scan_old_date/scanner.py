@@ -50,7 +50,7 @@ class PhotoScanner:
                 selected = result.candidates[0] if result.candidates else None
                 confidence = selected.confidence if selected else None
                 partial_pattern = re.compile(
-                    r"(?<!\\d)(?:19|20)\\d{2}[./_-](?:0?[1-9]|1[0-2])(?:[./_-])?",
+                    r"(?<!\d)(?:19|20)\d{2}[./_-](?:0?[1-9]|1[0-2])(?:[./_-])?",
                     re.IGNORECASE,
                 )
                 has_partial_stamp = any(
