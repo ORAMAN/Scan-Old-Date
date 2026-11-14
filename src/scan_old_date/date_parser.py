@@ -71,6 +71,11 @@ def parse_date_candidates(
     for match in _DAY_FIRST.finditer(cleaned):
         if any(start <= match.start() and match.end() <= end for start, end in led_spans):
             continue
+        # Do not reinterpret month/day digits inside a damaged year-first stamp
+        # as an unrelated day-first date (e.g. 2009/05/3126AM -> 2026-05-31).
+        prefix = cleaned[: match.start()]
+        if re.search(r"(?<!\\d)(?:19|20)\\d{2}[./_-]\\s*$", prefix):
+            continue
         first, second, year_raw = match.groups()[:3]
         _add_month_day_interpretations(
             found,
