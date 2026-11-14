@@ -8,16 +8,11 @@ from pathlib import Path
 
 from PIL import Image
 
-
-def _resolve_exiftool(exiftool: str) -> str | None:
-    candidate = Path(exiftool)
-    if candidate.is_file():
-        return str(candidate)
-    return shutil.which(exiftool)
+from .external_tools import resolve_exiftool
 
 
 def read_exif_date(path: str | Path, exiftool: str = "exiftool") -> str | None:
-    executable = _resolve_exiftool(exiftool)
+    executable = resolve_exiftool(exiftool)
     if executable:
         try:
             result = subprocess.run(
@@ -54,13 +49,13 @@ def apply_date(
     path = Path(path)
     metadata_cfg = config["metadata"]
     exiftool_setting = metadata_cfg.get("exiftool_path", "exiftool")
-    exiftool = _resolve_exiftool(exiftool_setting)
+    exiftool = resolve_exiftool(exiftool_setting)
     write_exif = metadata_cfg.get("write_exif", True)
 
     if write_exif and not exiftool:
         raise RuntimeError(
-            "ExifTool не найден. Установите ExifTool или укажите полный путь "
-            "в metadata.exiftool_path."
+            "ExifTool не найден. Укажите путь к exiftool.exe или папку его установки "
+            "в настройках приложения."
         )
     if write_exif and not metadata_cfg.get("overwrite_existing", False):
         existing = read_exif_date(path, exiftool_setting)
