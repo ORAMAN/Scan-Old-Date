@@ -6,12 +6,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .config import load_config
+from .config import load_config, save_config
+from .external_tools import resolve_exiftool, resolve_tesseract
 from .metadata import apply_date
 from .scanner import PhotoScanner
 
@@ -47,12 +48,14 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Scan-Old-Date")
         self.resize(1280, 780)
-        self.config = load_config()
+        self.config_path = Path("config/settings.yaml")
+        self.config = load_config(self.config_path)
         self.row_meta: list[dict] = []
         self.worker: ScanWorker | None = None
 
         central = QWidget()
         layout = QVBoxLayout(central)
+
         path_row = QHBoxLayout()
         self.folder = QLineEdit()
         self.folder.setPlaceholderText("Выберите папку с фотографиями…")
@@ -61,6 +64,67 @@ class MainWindow(QMainWindow):
         path_row.addWidget(self.folder, 1)
         path_row.addWidget(browse)
         layout.addLayout(path_row)
+
+        tools_group = QGroupBox(
+            "Внешние приложения — укажите EXE-файл, папку установки или команду из PATH"
+        )
+        tools_layout = QGridLayout(tools_group)
+
+        self.exiftool_path_input = QLineEdit(
+            str(self.config.get("metadata", {}).get("exiftool_path", "exiftool"))
+        )
+        self.exiftool_path_input.setPlaceholderText(
+            r"Например: C:\Tools\ExifTool или C:\Tools\ExifTool\exiftool.exe"
+        )
+        self.tesseract_path_input = QLineEdit(
+            str(self.config.get("tesseract", {}).get("command", ""))
+        )
+        self.tesseract_path_input.setPlaceholderText(
+            r"Например: C:\Program Files\Tesseract-OCR или tesseract.exe"
+        )
+
+        tools_layout.addWidget(QLabel("ExifTool:"), 0, 0)
+        tools_layout.addWidget(self.exiftool_path_input, 0, 1)
+        exif_file_button = QPushButton("EXE…")
+        exif_file_button.clicked.connect(
+            lambda: self.choose_tool_file(self.exiftool_path_input, "ExifTool")
+        )
+        exif_folder_button = QPushButton("Папка…")
+        exif_folder_button.clicked.connect(
+            lambda: self.choose_tool_folder(self.exiftool_path_input, "ExifTool")
+        )
+        tools_layout.addWidget(exif_file_button, 0, 2)
+        tools_layout.addWidget(exif_folder_button, 0, 3)
+        self.exiftool_status = QLabel("Не проверено")
+        tools_layout.addWidget(self.exiftool_status, 0, 4)
+
+        tools_layout.addWidget(QLabel("Tesseract OCR:"), 1, 0)
+        tools_layout.addWidget(self.tesseract_path_input, 1, 1)
+        tess_file_button = QPushButton("EXE…")
+        tess_file_button.clicked.connect(
+            lambda: self.choose_tool_file(self.tesseract_path_input, "Tesseract OCR")
+        )
+        tess_folder_button = QPushButton("Папка…")
+        tess_folder_button.clicked.connect(
+            lambda: self.choose_tool_folder(self.tesseract_path_input, "Tesseract OCR")
+        )
+        tools_layout.addWidget(tess_file_button, 1, 2)
+        tools_layout.addWidget(tess_folder_button, 1, 3)
+        self.tesseract_status = QLabel("Не проверено")
+        tools_layout.addWidget(self.tesseract_status, 1, 4)
+
+        tools_layout.setColumnStretch(1, 1)
+        layout.addWidget(tools_group)
+
+        tool_buttons = QHBoxLayout()
+        self.check_tools_button = QPushButton("Проверить пути")
+        self.check_tools_button.clicked.connect(self.check_tools)
+        self.save_settings_button = QPushButton("Сохранить настройки")
+        self.save_settings_button.clicked.connect(self.save_settings)
+        tool_buttons.addWidget(self.check_tools_button)
+        tool_buttons.addWidget(self.save_settings_button)
+        tool_buttons.addStretch(1)
+        layout.addLayout(tool_buttons)
 
         controls = QHBoxLayout()
         self.dry_run = QCheckBox("Только проверка (Dry Run)")
@@ -90,16 +154,103 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status)
         self.setCentralWidget(central)
 
+        self.exiftool_path_input.editingFinished.connect(self.refresh_tool_status)
+        self.tesseract_path_input.editingFinished.connect(self.refresh_tool_status)
+        self.refresh_tool_status()
+
     def choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Папка с фотографиями")
         if folder:
             self.folder.setText(folder)
+
+    def choose_tool_file(self, field: QLineEdit, tool_name: str):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Выберите исполняемый файл — {tool_name}",
+            "",
+            "Исполняемые файлы (*.exe);;Все файлы (*)",
+        )
+        if path:
+            field.setText(path)
+            self.refresh_tool_status()
+
+    def choose_tool_folder(self, field: QLineEdit, tool_name: str):
+        folder = QFileDialog.getExistingDirectory(
+            self, f"Выберите папку установки — {tool_name}"
+        )
+        if folder:
+            field.setText(folder)
+            self.refresh_tool_status()
+
+    def sync_tool_settings(self):
+        self.config.setdefault("metadata", {})["exiftool_path"] = (
+            self.exiftool_path_input.text().strip()
+        )
+        self.config.setdefault("tesseract", {})["command"] = (
+            self.tesseract_path_input.text().strip()
+        )
+
+    def refresh_tool_status(self):
+        self.sync_tool_settings()
+        exiftool = resolve_exiftool(self.exiftool_path_input.text())
+        tesseract = resolve_tesseract(self.tesseract_path_input.text())
+
+        self.exiftool_status.setText(
+            f"Найден: {exiftool}" if exiftool else "Не найден"
+        )
+        self.tesseract_status.setText(
+            f"Найден: {tesseract}" if tesseract else "Не найден"
+        )
+
+    def check_tools(self):
+        self.refresh_tool_status()
+        exiftool = resolve_exiftool(self.exiftool_path_input.text())
+        tesseract = resolve_tesseract(self.tesseract_path_input.text())
+        details = [
+            f"ExifTool: {exiftool or 'НЕ НАЙДЕН'}",
+            f"Tesseract OCR: {tesseract or 'НЕ НАЙДЕН'}",
+        ]
+        QMessageBox.information(self, "Проверка внешних приложений", "\n".join(details))
+
+    def save_settings(self, show_message: bool = True) -> bool:
+        self.sync_tool_settings()
+        try:
+            saved_path = save_config(self.config, self.config_path)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Ошибка сохранения настроек",
+                f"Не удалось сохранить конфигурацию: {exc}",
+            )
+            return False
+
+        self.refresh_tool_status()
+        if show_message:
+            QMessageBox.information(
+                self, "Настройки сохранены",
+                f"Пути к внешним приложениям сохранены в:\n{saved_path}",
+            )
+        return True
 
     def start_scan(self):
         root = Path(self.folder.text().strip())
         if not root.is_dir():
             QMessageBox.warning(self, "Scan-Old-Date", "Выберите существующую папку.")
             return
+
+        if not self.save_settings(show_message=False):
+            return
+
+        tesseract = resolve_tesseract(self.tesseract_path_input.text())
+        if not tesseract:
+            QMessageBox.critical(
+                self,
+                "Tesseract OCR не найден",
+                "Не удалось найти Tesseract OCR. Укажите полный путь к tesseract.exe "
+                "или выберите папку установки в верхней части окна. Можно также "
+                "установить Tesseract и добавить его в PATH.",
+            )
+            return
+
         self.table.setRowCount(0)
         self.row_meta.clear()
         self.scan_button.setEnabled(False)
@@ -178,6 +329,17 @@ class MainWindow(QMainWindow):
                 self, "Dry Run", "Снимите флажок Dry Run, чтобы разрешить запись."
             )
             return
+        if self.config.get("metadata", {}).get("write_exif", True):
+            exiftool = resolve_exiftool(self.exiftool_path_input.text())
+            if not exiftool:
+                QMessageBox.critical(
+                    self,
+                    "ExifTool не найден",
+                    "Для записи EXIF укажите путь к exiftool.exe или папку установки "
+                    "в верхней части окна.",
+                )
+                return
+
         selected = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
         if not selected:
             QMessageBox.information(self, "Scan-Old-Date", "Выберите строки для применения.")
