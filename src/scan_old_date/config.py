@@ -48,8 +48,25 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     if config_path.exists():
         with config_path.open("r", encoding="utf-8") as stream:
             loaded = yaml.safe_load(stream) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Invalid configuration format in {config_path}: expected a YAML mapping.")
         _merge(config, loaded)
     return config
+
+
+def save_config(config: dict[str, Any], path: str | Path | None = None) -> Path:
+    """Persist the complete application configuration as UTF-8 YAML."""
+    config_path = Path(path) if path else Path("config/settings.yaml")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with config_path.open("w", encoding="utf-8", newline="\n") as stream:
+        yaml.safe_dump(
+            config,
+            stream,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+    return config_path
 
 
 def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
