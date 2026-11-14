@@ -108,10 +108,10 @@ class StampDetector:
             x_min = min(item[0] for item in group)
             x_max = max(item[0] + item[2] for item in group)
             box = (
-                max(0, x_min - 6),
-                max(0, y_min - 12),
-                min(width, x_max + 6),
-                min(height, y_max + 12),
+                max(0, x_min - 11),
+                max(0, y_min - 20),
+                min(width, x_max + 11),
+                min(height, y_max + 20),
             )
             region = self._make_region(
                 rgb, "yellow-stamp-vertical-components", box, 0.90
