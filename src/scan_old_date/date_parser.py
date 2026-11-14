@@ -30,8 +30,8 @@ _OCR_YEAR_FIRST = re.compile(
 # preserved after the year, but the day and compact time are glued together,
 # e.g. "2009/06/ 1316AM" for 2009/06/13 01:36 AM.
 _YEAR_FIRST_SPACED = re.compile(
-    r"(?<!\\d)(20\\d{2}|19\\d{2})[./_-]\\s*(\\d{1,2})[./_-]\\s*(\\d{2})"
-    r"\\s*\\d{2,4}\\s*(?:AM|PM)(?![A-Z])",
+    r"(?<!\d)(20\d{2}|19\d{2})[./_-]\s*(\d{1,2})[./_-]\s*(\d{2})"
+    r"\s*\d{2,4}\s*(?:AM|PM)(?![A-Z])",
     re.IGNORECASE,
 )
 _DAY_FIRST = re.compile(
