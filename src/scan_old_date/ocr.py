@@ -261,17 +261,21 @@ class HybridRecognizer:
         source = region.image
         source_height, source_width = source.shape[:2]
         max_dimension = max(source_height, source_width)
-        scale = max(2, min(5, 1800 // max(1, max_dimension)))
+        scale = max(2, min(8, 2400 // max(1, max_dimension)))
 
-        # Corner and side crops can contain a stamp rotated by 90 degrees.
-        # Very wide bottom strips are kept horizontal to avoid needless OCR work.
+        # Side strips and tight vertical stamp proposals are tried upright first.
         aspect = source_width / max(1, source_height)
-        rotations = (0, 90, 270) if aspect <= 2.2 else (0,)
+        if aspect < 1.25:
+            rotations = (270, 0, 90)
+        elif aspect <= 1.8:
+            rotations = (0, 270, 90)
+        else:
+            rotations = (0,)
 
         cfg = self.config["tesseract"]
         lang = cfg.get("languages", "eng")
         configured_psm = int(cfg.get("page_segmentation_mode", 11))
-        psm_values = list(dict.fromkeys((7, configured_psm)))
+        psm_values = list(dict.fromkeys((6, 7, configured_psm)))
         reads: list[_OCRRead] = []
 
         for angle in rotations:
@@ -303,14 +307,14 @@ class HybridRecognizer:
             yellow_ratio = float(np.count_nonzero(yellow_mask)) / max(
                 1, yellow_mask.size
             )
-            variants: list[tuple[str, np.ndarray]] = [("contrast", contrast)]
-            # The inverse mask makes yellow/orange stamp glyphs dark on a light
-            # background. Skip it when the crop is dominated by yellow scenery.
+            variants: list[tuple[str, np.ndarray]] = [
+                ("gray", gray),
+                ("contrast", contrast),
+            ]
             if 0.0015 <= yellow_ratio <= 0.38:
-                variants.append(
-                    ("yellow-mask", cv2.bitwise_not(yellow_mask))
-                )
+                variants.append(("yellow-mask", cv2.bitwise_not(yellow_mask)))
 
+            orientation_found_date = False
             for variant_name, image in variants:
                 for psm in psm_values:
                     tesseract_config = (
@@ -331,25 +335,32 @@ class HybridRecognizer:
                         data.get("text", []), data.get("conf", [])
                     ):
                         word = word.strip()
+                        if not word:
+                            continue
+                        # Tesseract sometimes returns -1 confidence for a merged
+                        # token such as "1316AM". Keep numeric tokens anyway; only
+                        # nonnegative scores contribute to the confidence average.
+                        if not (
+                            any(character.isdigit() for character in word)
+                            or word.upper() in {"AM", "PM"}
+                        ):
+                            continue
                         try:
                             score = float(raw_confidence)
                         except (TypeError, ValueError):
-                            continue
-                        if not word or score < 0:
-                            continue
-                        # Background text and carpet patterns used to dilute the
-                        # confidence. Keep numeric tokens and camera AM/PM markers.
-                        if any(character.isdigit() for character in word) or word.upper() in {
-                            "AM",
-                            "PM",
-                        }:
-                            date_words.append(word)
+                            score = -1.0
+                        date_words.append(word)
+                        if score >= 0:
                             date_scores.append(score)
 
                     text = " ".join(date_words)
                     if not text:
                         continue
-                    confidence = sum(date_scores) / len(date_scores) / 100.0
+                    confidence = (
+                        sum(date_scores) / len(date_scores) / 100.0
+                        if date_scores
+                        else 0.35
+                    )
                     reads.append(
                         _OCRRead(
                             text,
@@ -359,13 +370,17 @@ class HybridRecognizer:
                             psm,
                         )
                     )
-                    # PSM 7 is tuned for the usual single-line camera stamp.
-                    # Retry with the configured segmentation mode only when
-                    # PSM 7 did not produce a valid calendar date.
-                    if psm == 7 and self._parse(text):
+                    if self._parse(text):
+                        orientation_found_date = True
                         break
+                if orientation_found_date:
+                    break
 
-        # Remove duplicate text produced by equivalent thresholding/PSM passes.
+            # Once one orientation yields a calendar-valid date, the remaining
+            # rotations are unlikely to add value and may create false alternatives.
+            if orientation_found_date:
+                break
+
         unique: dict[tuple[str, int], _OCRRead] = {}
         for read in reads:
             key = (read.text, read.rotation)
