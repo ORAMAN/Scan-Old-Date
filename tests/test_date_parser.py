@@ -28,3 +28,21 @@ def test_camera_led_stamp_with_apostrophe():
     result = parse_date_candidates("7 4 '98")
     assert result
     assert result[0].value == date(1998, 7, 4)
+
+
+def test_year_first_stamp_with_time_attached_to_date():
+    result = parse_date_candidates("2009/08/0704:57PM")
+    assert len(result) == 1
+    assert result[0].value == date(2009, 8, 7)
+
+
+def test_recover_slash_misread_as_seven_in_rotated_stamp():
+    result = parse_date_candidates("2009706/1301:36AM")
+    assert result
+    assert result[0].value == date(2009, 6, 13)
+
+
+def test_duplicate_ocr_reads_do_not_create_duplicate_dates():
+    result = parse_date_candidates("2009-08-07 2009/08/07")
+    assert len(result) == 1
+    assert result[0].value == date(2009, 8, 7)
