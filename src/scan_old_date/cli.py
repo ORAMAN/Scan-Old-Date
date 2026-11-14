@@ -48,7 +48,7 @@ def main() -> None:
                     print(f"       ERROR writing metadata: {exc}")
         else:
             partial_pattern = re.compile(
-                r"(?<!\\d)(?:19|20)\\d{2}[./_-](?:0?[1-9]|1[0-2])(?:[./_-])?",
+                r"(?<!\d)(?:19|20)\d{2}[./_-](?:0?[1-9]|1[0-2])(?:[./_-])?",
                 re.IGNORECASE,
             )
             partial_text = next(
