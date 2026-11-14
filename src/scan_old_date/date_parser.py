@@ -14,12 +14,21 @@ class ParsedDate:
     ambiguous: bool = False
 
 
-# ISO-like year-first and common month/day/year forms.
+# Some camera stamps have the time printed immediately after the date, with no space.
+_TIME_SUFFIX = r"(?:\s*\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\s*(?:AM|PM)?)?"
 _YEAR_FIRST = re.compile(
-    r"(?<!\d)(20\d{2}|19\d{2})[./_\- ](\d{1,2})[./_\- ](\d{1,2})(?!\d)"
+    rf"(?<!\d)(20\d{{2}}|19\d{{2}})[./_\- ](\d{{1,2}})[./_\- ](\d{{1,2}}){_TIME_SUFFIX}(?!\d)",
+    re.IGNORECASE,
+)
+# In small/rotated stamps, Tesseract sometimes reads the slash after the year as 7 or 1:
+# 2009/06/13 -> 2009706/13. Accept only a valid 2-digit month/day in this pattern.
+_OCR_YEAR_FIRST = re.compile(
+    rf"(?<!\d)(20\d{{2}}|19\d{{2}})[71](0[1-9]|1[0-2])[./_\-](0[1-9]|[12]\d|3[01]){_TIME_SUFFIX}(?!\d)",
+    re.IGNORECASE,
 )
 _DAY_FIRST = re.compile(
-    r"(?<!\d)(\d{1,2})[./_\- ](\d{1,2})[./_\- ](\d{2}|\d{4})(?!\d)"
+    rf"(?<!\d)(\d{{1,2}})[./_\- ](\d{{1,2}})[./_\- ](\d{{2}}|\d{{4}}){_TIME_SUFFIX}(?!\d)",
+    re.IGNORECASE,
 )
 # Common compact LED camera stamp: M D 'YY, M-D-YY or M D YY.
 _LED_STAMP = re.compile(
@@ -30,12 +39,21 @@ _LED_STAMP = re.compile(
 def parse_date_candidates(
     text: str, min_year: int = 1950, max_year: int = 2035
 ) -> list[ParsedDate]:
-    cleaned = text.replace("O", "0").replace("o", "0").replace("I", "1").replace("l", "1")
+    cleaned = (
+        text.replace("O", "0")
+        .replace("o", "0")
+        .replace("I", "1")
+        .replace("l", "1")
+    )
     found: list[ParsedDate] = []
 
     for match in _YEAR_FIRST.finditer(cleaned):
-        year, month, day = map(int, match.groups())
+        year, month, day = map(int, match.groups()[:3])
         _append(found, year, month, day, match.group(), 0.96, min_year, max_year)
+
+    for match in _OCR_YEAR_FIRST.finditer(cleaned):
+        year, month, day = map(int, match.groups()[:3])
+        _append(found, year, month, day, match.group(), 0.78, min_year, max_year)
 
     # Avoid parsing the same substring twice as both a generic and LED pattern.
     led_spans: set[tuple[int, int]] = set()
@@ -50,18 +68,30 @@ def parse_date_candidates(
     for match in _DAY_FIRST.finditer(cleaned):
         if any(start <= match.start() and match.end() <= end for start, end in led_spans):
             continue
-        first, second, year_raw = match.groups()
+        first, second, year_raw = match.groups()[:3]
         _add_month_day_interpretations(
-            found, int(first), int(second), _expand_year(int(year_raw)),
-            match.group(), 0.82, min_year, max_year
+            found,
+            int(first),
+            int(second),
+            _expand_year(int(year_raw)),
+            match.group(),
+            0.82,
+            min_year,
+            max_year,
         )
 
-    unique: dict[tuple[date, str], ParsedDate] = {}
+    # Keep the strongest interpretation of each actual calendar date. Different
+    # OCR passes often return the same date with slightly different surrounding text.
+    unique: dict[date, ParsedDate] = {}
     for item in found:
-        current = unique.get((item.value, item.source_text))
+        current = unique.get(item.value)
         if current is None or item.confidence > current.confidence:
-            unique[(item.value, item.source_text)] = item
-    return sorted(unique.values(), key=lambda item: item.confidence, reverse=True)
+            unique[item.value] = item
+    return sorted(
+        unique.values(),
+        key=lambda item: (item.confidence, not item.ambiguous),
+        reverse=True,
+    )
 
 
 def _expand_year(year: int) -> int:
