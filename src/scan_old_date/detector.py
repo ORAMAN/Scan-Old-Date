@@ -198,7 +198,7 @@ class StampDetector:
                 continue
 
             median_height = float(np.median([item[3] for item in group]))
-            partial_at_right_edge = x2 >= width - 5 and span_x < width * 0.25
+            partial_at_right_edge = x2 >= width - 12 and span_x < width * 0.25
             if partial_at_right_edge:
                 # Small stamp fragments cut by the photo edge need a little more
                 # vertical context, but less unrelated background on their left.
