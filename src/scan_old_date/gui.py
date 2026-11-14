@@ -6,11 +6,14 @@ from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QDialog, QFileDialog, QGridLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
+    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
+
+from PIL import Image, ImageDraw, ImageOps
 
 from .config import default_config_path, load_config, save_config
 from .external_tools import resolve_exiftool, resolve_tesseract
@@ -133,24 +136,41 @@ class MainWindow(QMainWindow):
         self.dry_run.setToolTip("При включённом режиме файлы не изменяются.")
         self.scan_button = QPushButton("Сканировать")
         self.scan_button.clicked.connect(self.start_scan)
+        self.preview_button = QPushButton("Показать рамки штампа")
+        self.preview_button.clicked.connect(self.show_selected_preview)
         self.apply_button = QPushButton("Применить выбранные даты")
         self.apply_button.clicked.connect(self.apply_selected)
         controls.addWidget(self.dry_run)
+        controls.addWidget(self.preview_button)
         controls.addStretch(1)
         controls.addWidget(self.scan_button)
         controls.addWidget(self.apply_button)
         layout.addLayout(controls)
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Файл", "Дата по штампу (редактируется)", "Существующая EXIF-дата (справочно)", "Уверенность", "Статус", "Метод"]
+            [
+                "Файл",
+                "Дата по штампу (редактируется)",
+                "Существующая EXIF-дата (справочно)",
+                "Уверенность",
+                "Статус",
+                "Метод",
+                "Областей",
+            ]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self.on_item_changed)
+        self.table.cellDoubleClicked.connect(self.show_region_preview)
+        self.table.setToolTip(
+            "Двойной щелчок по строке или кнопка «Показать рамки штампа» "
+            "открывает фотографию с прямоугольниками областей OCR."
+        )
         layout.addWidget(self.table, 1)
         self.status = QLabel(
-            "Готово. Сначала выполните Dry Run. Дату можно исправить прямо в таблице."
+            "Готово. Сначала выполните Dry Run. Дата редактируется в формате ГГГГ-ММ-ДД. "
+            "Двойной щелчок по строке показывает рамки областей OCR."
         )
         layout.addWidget(self.status)
         self.setCentralWidget(central)
@@ -264,44 +284,183 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def add_result(self, result, status: str, confidence):
-        # The editable date must come only from visual stamp recognition.
+        # Keep one syntactically valid date in the table. Alternative OCR
+        # interpretations are shown in the region preview and the cell tooltip.
         candidate = result.candidates[0] if result.candidates else None
-        if candidate and candidate.ambiguous:
-            alternatives = list(dict.fromkeys(
-                item.value.isoformat()
-                for item in result.candidates
-                if item.ambiguous
-            ))
-            stamp_date_text = " / ".join(alternatives)
-        else:
-            stamp_date_text = candidate.value.isoformat() if candidate else ""
-
+        stamp_date_text = candidate.value.isoformat() if candidate else ""
+        alternatives = list(
+            dict.fromkeys(item.value.isoformat() for item in result.candidates)
+        )
         existing_exif = getattr(result, "existing_exif_date", None) or ""
+        regions = getattr(result, "region_diagnostics", []) or []
+
         row = self.table.rowCount()
         self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem(result.path))
+        file_item = QTableWidgetItem(result.path)
+        file_item.setToolTip("Двойной щелчок по строке — показать найденные области.")
+        self.table.setItem(row, 0, file_item)
 
         date_item = QTableWidgetItem(stamp_date_text)
         date_item.setFlags(date_item.flags() | Qt.ItemFlag.ItemIsEditable)
-        date_item.setToolTip(
-            "Эта дата получена распознаванием видимого штампа. "
-            "EXIF не используется как источник даты съёмки."
+        tooltip = (
+            "Дата получена из видимого штампа, EXIF не используется как источник даты. "
+            "Формат: ГГГГ-ММ-ДД. Исправление значения вручную разрешает его применение."
         )
+        if candidate and candidate.ambiguous:
+            tooltip += (
+                "\nРаспознавание неоднозначно. Возможные значения: "
+                + ", ".join(alternatives)
+            )
+        if alternatives:
+            tooltip += "\nДругие варианты OCR: " + ", ".join(alternatives[1:])
+        date_item.setToolTip(tooltip)
         self.table.setItem(row, 1, date_item)
         self.table.setItem(row, 2, QTableWidgetItem(existing_exif))
         self.table.setItem(
-            row, 3, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else "")
+            row,
+            3,
+            QTableWidgetItem(
+                f"{confidence:.2f}" if confidence is not None else ""
+            ),
         )
         self.table.setItem(row, 4, QTableWidgetItem(status))
         self.table.setItem(row, 5, QTableWidgetItem(", ".join(result.methods)))
+        self.table.setItem(row, 6, QTableWidgetItem(str(len(regions))))
 
-        self.row_meta.append({
-            "confidence": float(confidence or 0.0),
-            "ambiguous": bool(candidate.ambiguous) if candidate else True,
-            "manual": False,
-            "original_date": stamp_date_text,
-            "existing_exif": bool(existing_exif),
-        })
+        self.row_meta.append(
+            {
+                "confidence": float(confidence or 0.0),
+                "ambiguous": bool(candidate.ambiguous) if candidate else True,
+                "manual": False,
+                "original_date": stamp_date_text,
+                "existing_exif": bool(existing_exif),
+                "regions": regions,
+            }
+        )
+
+    def show_selected_preview(self):
+        selected = sorted(
+            {index.row() for index in self.table.selectionModel().selectedRows()}
+        )
+        if not selected:
+            QMessageBox.information(
+                self, "Просмотр областей", "Сначала выберите строку с фотографией."
+            )
+            return
+        self.show_region_preview(selected[0], 0)
+
+    def show_region_preview(self, row: int, column: int = 0):
+        if row < 0 or row >= len(self.row_meta):
+            return
+        path = self.table.item(row, 0).text()
+        diagnostics = self.row_meta[row].get("regions", [])
+
+        try:
+            with Image.open(path) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+                original_width, original_height = image.size
+                scale = min(
+                    1.0,
+                    1180 / max(1, original_width),
+                    650 / max(1, original_height),
+                )
+                display_width = max(1, int(original_width * scale))
+                display_height = max(1, int(original_height * scale))
+                image = image.resize(
+                    (display_width, display_height), Image.Resampling.LANCZOS
+                )
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Просмотр областей", f"Не удалось открыть фотографию:\n{exc}"
+            )
+            return
+
+        draw = ImageDraw.Draw(image)
+        details: list[str] = []
+        for index, item in enumerate(diagnostics, start=1):
+            bbox = item.get("bbox")
+            has_date = bool(item.get("dates"))
+            color = (30, 220, 90) if has_date else (255, 170, 35)
+            if bbox and len(bbox) == 4:
+                x1, y1, x2, y2 = bbox
+                rectangle = (
+                    int(x1 * scale),
+                    int(y1 * scale),
+                    int(x2 * scale),
+                    int(y2 * scale),
+                )
+                draw.rectangle(rectangle, outline=color, width=3)
+                label_y = max(0, rectangle[1] - 16)
+                draw.text(
+                    (rectangle[0] + 2, label_y),
+                    f"#{index} {item.get('label', '')}",
+                    fill=color,
+                    stroke_width=1,
+                    stroke_fill=(0, 0, 0),
+                )
+
+            x1, y1, x2, y2 = bbox or ("?", "?", "?", "?")
+            line = (
+                f"#{index} {item.get('label', 'область')} | "
+                f"рамка: {x1}, {y1} — {x2}, {y2} | "
+                f"OCR: {item.get('ocr_text') or 'текст не найден'} | "
+                f"уверенность OCR: {item.get('ocr_confidence', 0)} | "
+                f"поворот: {item.get('rotation', 0)}°"
+            )
+            dates = item.get("dates") or []
+            if dates:
+                line += " | даты: " + ", ".join(
+                    f"{date_item['value']} ({date_item['confidence']:.2f})"
+                    for date_item in dates
+                )
+            if item.get("error"):
+                line += " | ошибка: " + str(item["error"])
+            details.append(line)
+
+            for read in item.get("reads", []):
+                if read.get("text") and read.get("text") != item.get("ocr_text"):
+                    details.append(
+                        f"   Вариант OCR: {read['text']} "
+                        f"(поворот {read['rotation']}°, {read['variant']}, "
+                        f"PSM {read['psm']}, conf {read['confidence']:.2f})"
+                    )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Области распознавания — {Path(path).name}")
+        dialog.resize(1260, 900)
+        layout = QVBoxLayout(dialog)
+        note = QLabel(
+            "Зелёная рамка — область, в которой найден кандидат даты; "
+            "оранжевая — область проверялась, но дата не получена. "
+            "Рамки показывают фрагменты, переданные OCR, а не контуры отдельных символов."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        image_bytes = image.tobytes("raw", "RGB")
+        qimage = QImage(
+            image_bytes,
+            image.width,
+            image.height,
+            image.width * 3,
+            QImage.Format.Format_RGB888,
+        ).copy()
+        image_label = QLabel()
+        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image_label.setPixmap(QPixmap.fromImage(qimage))
+        layout.addWidget(image_label, 1)
+
+        details_box = QPlainTextEdit()
+        details_box.setReadOnly(True)
+        details_box.setMaximumHeight(190)
+        details_box.setPlainText(
+            "\n".join(details) if details else "Детектор не вернул областей."
+        )
+        layout.addWidget(details_box)
+        close_button = QPushButton("Закрыть")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        dialog.exec()
 
     def scan_finished(self, count: int):
         self.status.setText(
@@ -325,7 +484,13 @@ class MainWindow(QMainWindow):
             meta = self.row_meta[row]
             meta["manual"] = item.text().strip() != meta["original_date"]
             if meta["manual"]:
-                self.table.item(row, 3).setText("manual-review")
+                self.table.item(row, 3).setText("manual")
+                self.table.item(row, 3).setToolTip(
+                    "Дата изменена вручную. Она будет применена после общего подтверждения."
+                )
+            else:
+                self.table.item(row, 3).setText(f"{meta['confidence']:.2f}")
+                self.table.item(row, 3).setToolTip("Оценка OCR.")
 
     def apply_selected(self):
         if self.dry_run.isChecked():
@@ -344,11 +509,17 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-        selected = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
+        selected = sorted(
+            {index.row() for index in self.table.selectionModel().selectedRows()}
+        )
         if not selected:
-            QMessageBox.information(self, "Scan-Old-Date", "Выберите строки для применения.")
+            QMessageBox.information(
+                self, "Scan-Old-Date", "Выберите строки для применения."
+            )
             return
+
         prepared = []
+        requires_confirmation = []
         for row in selected:
             meta = self.row_meta[row]
             text = self.table.item(row, 1).text().strip()
@@ -357,35 +528,68 @@ class MainWindow(QMainWindow):
             except ValueError:
                 self.table.item(row, 3).setText("invalid-date")
                 continue
+
+            item = (row, self.table.item(row, 0).text(), parsed)
             if not meta["manual"] and (
                 meta["ambiguous"]
-                or meta["confidence"] < float(self.config["recognition"]["auto_accept_threshold"])
+                or meta["confidence"]
+                < float(self.config["recognition"]["auto_accept_threshold"])
             ):
-                self.table.item(row, 3).setText("needs-review")
-                continue
-            prepared.append((row, self.table.item(row, 0).text(), parsed))
+                requires_confirmation.append(item)
+            else:
+                prepared.append(item)
+
+        if requires_confirmation:
+            preview_lines = [
+                f"• {Path(path).name}: {value.isoformat()}"
+                for _, path, value in requires_confirmation[:8]
+            ]
+            if len(requires_confirmation) > 8:
+                preview_lines.append(
+                    f"… и ещё {len(requires_confirmation) - 8} файлов"
+                )
+            answer = QMessageBox.question(
+                self,
+                "Низкая уверенность распознавания",
+                f"У {len(requires_confirmation)} выбранных дат низкая уверенность "
+                "или несколько вариантов. Записать именно те значения, которые "
+                "сейчас показаны в редактируемом столбце?\n\n"
+                + "\n".join(preview_lines)
+                + "\n\nПроверьте даты и рамки OCR перед подтверждением.",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                prepared.extend(requires_confirmation)
 
         if not prepared:
             QMessageBox.information(
-                self, "Scan-Old-Date",
-                "Нет готовых дат. Исправьте дату вручную или проверьте настройки перезаписи EXIF."
+                self,
+                "Scan-Old-Date",
+                "Нет дат для записи. Проверьте формат ГГГГ-ММ-ДД, "
+                "исправьте дату вручную или подтвердите выбранные значения "
+                "с низкой уверенностью.",
             )
             return
-        files_with_exif = sum(1 for row, _, _ in prepared if self.row_meta[row]["existing_exif"])
+
+        files_with_exif = sum(
+            1 for row, _, _ in prepared if self.row_meta[row]["existing_exif"]
+        )
         warning = (
             f"\n\nУ {files_with_exif} выбранных файлов уже есть EXIF-дата. "
             "Она будет заменена датой, распознанной по штампу."
-            if files_with_exif else ""
+            if files_with_exif
+            else ""
         )
         answer = QMessageBox.question(
-            self, "Подтверждение",
-            f"Записать даты по штампу для {len(prepared)} файлов?"
+            self,
+            "Подтверждение записи",
+            f"Записать даты для {len(prepared)} файлов?"
             f"{warning}\n\nПеред изменением будут созданы резервные копии.",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        # Clicking Yes explicitly authorizes replacing a possibly incorrect existing EXIF date.
+
         apply_config = deepcopy(self.config)
+        # The user's explicit confirmation authorizes replacing possibly incorrect EXIF.
         apply_config.setdefault("metadata", {})["overwrite_existing"] = True
         done = 0
         for row, path, value in prepared:
