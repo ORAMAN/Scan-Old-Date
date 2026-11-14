@@ -182,9 +182,12 @@ class StampDetector:
                 continue
             unique_colours.append(proposal)
 
-        available = max(0, self.max_regions - len(regions))
-        regions.extend(unique_colours[:available])
-        return regions
+        # Tight colour proposals are more useful than broad corner crops.
+        # Put a small, ranked set first so a clear date can be found without
+        # spending OCR time on every large image zone.
+        selected_colours = unique_colours[: min(4, max(0, self.max_regions - 1))]
+        base_limit = max(0, self.max_regions - len(selected_colours))
+        return selected_colours + regions[:base_limit]
 
     @staticmethod
     def _base_boxes(width: int, height: int):
