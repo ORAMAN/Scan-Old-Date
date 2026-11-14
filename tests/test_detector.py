@@ -7,18 +7,18 @@ from scan_old_date.detector import StampDetector
 
 def test_detector_includes_bottom_corners_and_side_strips(tmp_path):
     image = np.full((480, 360, 3), 30, dtype=np.uint8)
-    stamp = np.full((190, 36, 3), 0, dtype=np.uint8)
+    stamp_line = np.zeros((36, 190, 3), dtype=np.uint8)
     cv2.putText(
-        stamp,
+        stamp_line,
         "2009/06/13",
-        (32, 182),
+        (2, 27),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.48,
+        0.45,
         (0, 255, 255),
         1,
         cv2.LINE_AA,
     )
-    stamp = cv2.rotate(stamp, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    stamp = cv2.rotate(stamp_line, cv2.ROTATE_90_COUNTERCLOCKWISE)
     stamp_height, stamp_width = stamp.shape[:2]
     image[285 : 285 + stamp_height, 18 : 18 + stamp_width] = stamp
 
