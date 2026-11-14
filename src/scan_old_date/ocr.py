@@ -295,7 +295,7 @@ class HybridRecognizer:
         max_dimension = max(source_height, source_width)
         # Keep glyphs large enough for Tesseract without turning a small crop into
         # a huge mostly-background image.
-        scale = max(3, min(6, 1800 // max(1, max_dimension)))
+        scale = max(2, min(4, 1600 // max(1, max_dimension)))
 
         if region.label == "yellow-stamp-vertical-components":
             rotations = (270, 0)
@@ -394,6 +394,11 @@ class HybridRecognizer:
                         if date_scores
                         else 0.30
                     )
+                    # Tesseract often reports zero confidence for a complete
+                    # single-word outlined camera stamp. A valid calendar date
+                    # is stronger evidence than that unusable zero score.
+                    if self._parse(text) and confidence < 0.05:
+                        confidence = 0.55
                     reads.append(
                         _OCRRead(
                             text,
