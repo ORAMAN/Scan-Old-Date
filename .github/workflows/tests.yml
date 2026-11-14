@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test runner
-        run: python -m pip install pytest PyYAML
+        run: python -m pip install pytest PyYAML Pillow opencv-python-headless pytesseract requests
       - name: Compile Python sources
         run: python -m compileall -q src tests
       - name: Run tests
