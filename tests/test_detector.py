@@ -38,7 +38,7 @@ def test_detector_creates_tight_region_for_vertical_yellow_stamp(tmp_path):
     assert x1 < 30
     assert x2 - x1 < 55
     assert y1 > 250
-    assert y2 == 480
+    assert y2 > 460
     assert regions[0].image.shape[1] == x2 - x1
     assert regions[0].image.shape[0] == y2 - y1
 
@@ -48,7 +48,7 @@ def test_detector_creates_tight_region_for_horizontal_yellow_stamp(tmp_path):
     cv2.putText(
         image,
         "2009/08/07",
-        (300, 380),
+        (380, 380),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 255, 0),
@@ -64,9 +64,9 @@ def test_detector_creates_tight_region_for_horizontal_yellow_stamp(tmp_path):
     assert regions[0].label == "yellow-stamp-horizontal-components"
     assert regions[0].bbox is not None
     x1, y1, x2, y2 = regions[0].bbox
-    assert x2 == 600
+    assert x2 > 480
     assert y1 > 300
-    assert x2 - x1 < 400
+    assert x2 - x1 < 200
 
 
 def test_detector_falls_back_to_edge_regions_when_stamp_colour_is_absent(tmp_path):
