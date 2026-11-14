@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Callable, Iterator
 
 from .database import ScanDatabase
@@ -48,7 +49,18 @@ class PhotoScanner:
 
                 selected = result.candidates[0] if result.candidates else None
                 confidence = selected.confidence if selected else None
-                status = "review" if selected else "not-found"
+                partial_pattern = re.compile(
+                    r"(?<!\\d)(?:19|20)\\d{2}[./_-](?:0?[1-9]|1[0-2])(?:[./_-])?",
+                    re.IGNORECASE,
+                )
+                has_partial_stamp = any(
+                    partial_pattern.search(text) for text in result.raw_text
+                )
+                status = (
+                    "review"
+                    if selected
+                    else ("partial" if has_partial_stamp else "not-found")
+                )
 
                 details = list(result.errors)
                 if existing_exif:
