@@ -58,6 +58,67 @@ class StampDetector:
         )
 
         colour_proposals: list[CandidateRegion] = []
+
+        # Vertical camera stamps are often made of disconnected glyphs. Rather
+        # than merge every yellow object in the scene, cluster small components
+        # that share nearly the same X coordinate along an image edge.
+        component_count, _, component_stats, component_centres = (
+            cv2.connectedComponentsWithStats(yellow_orange, 8)
+        )
+        glyphs: list[tuple[int, int, int, int, float]] = []
+        max_glyph_width = max(14, int(width * 0.055))
+        max_glyph_height = max(26, int(height * 0.065))
+        for component_index in range(1, component_count):
+            gx, gy, gw, gh, area = component_stats[component_index]
+            centre_x = float(component_centres[component_index][0])
+            near_side = gx < width * 0.20 or gx + gw > width * 0.80
+            if (
+                near_side
+                and gy > height * 0.35
+                and 3 <= gw <= max_glyph_width
+                and 3 <= gh <= max_glyph_height
+                and area >= 6
+            ):
+                glyphs.append((gx, gy, gw, gh, centre_x))
+
+        glyph_groups: list[list[tuple[int, int, int, int, float]]] = []
+        for glyph in sorted(glyphs, key=lambda item: item[4]):
+            target = next(
+                (
+                    group
+                    for group in glyph_groups
+                    if abs(
+                        glyph[4]
+                        - sum(item[4] for item in group) / len(group)
+                    )
+                    <= max(7.0, width * 0.022)
+                ),
+                None,
+            )
+            if target is None:
+                glyph_groups.append([glyph])
+            else:
+                target.append(glyph)
+
+        for group in glyph_groups:
+            y_min = min(item[1] for item in group)
+            y_max = max(item[1] + item[3] for item in group)
+            if len(group) < 5 or y_max - y_min < height * 0.12:
+                continue
+            x_min = min(item[0] for item in group)
+            x_max = max(item[0] + item[2] for item in group)
+            box = (
+                max(0, x_min - 5),
+                max(0, y_min - 7),
+                min(width, x_max + 5),
+                min(height, y_max + 7),
+            )
+            region = self._make_region(
+                rgb, "yellow-stamp-vertical-components", box, 0.90
+            )
+            if region is not None:
+                colour_proposals.append(region)
+
         for kernel in kernels:
             joined = cv2.morphologyEx(yellow_orange, cv2.MORPH_CLOSE, kernel)
             contours, _ = cv2.findContours(
