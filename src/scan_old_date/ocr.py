@@ -21,6 +21,8 @@ class RecognitionResult:
     raw_text: list[str]
     methods: list[str]
     errors: list[str]
+    # Existing metadata is shown only as a reference; it is not a recognition candidate.
+    existing_exif_date: str | None = None
 
 
 class HybridRecognizer:
