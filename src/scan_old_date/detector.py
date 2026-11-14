@@ -198,17 +198,28 @@ class StampDetector:
                 continue
 
             median_height = float(np.median([item[3] for item in group]))
-            pad_x = max(7, int(round(median_height * 0.60)))
-            pad_y = max(3, int(round(median_height * 0.25)))
-            box = (
-                max(0, x1 - pad_x),
-                max(0, y1 - pad_y),
-                min(width, x2 + pad_x),
-                min(height, y2 + pad_y),
-            )
-            region = self._make_region(
-                rgb, "yellow-stamp-horizontal-components", box, 0.95
-            )
+            partial_at_right_edge = x2 >= width - 5 and span_x < width * 0.25
+            if partial_at_right_edge:
+                # Small stamp fragments cut by the photo edge need a little more
+                # vertical context, but less unrelated background on their left.
+                box = (
+                    min(width - 1, x1 + 4),
+                    max(0, y1 - 9),
+                    width,
+                    min(height, y2 + 9),
+                )
+                label = "yellow-stamp-horizontal-partial"
+            else:
+                pad_x = max(7, int(round(median_height * 0.60)))
+                pad_y = max(3, int(round(median_height * 0.25)))
+                box = (
+                    max(0, x1 - pad_x),
+                    max(0, y1 - pad_y),
+                    min(width, x2 + pad_x),
+                    min(height, y2 + pad_y),
+                )
+                label = "yellow-stamp-horizontal-components"
+            region = self._make_region(rgb, label, box, 0.90 if partial_at_right_edge else 0.95)
             if region is not None:
                 proposals.append(region)
 
