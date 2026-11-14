@@ -11,6 +11,7 @@ from PIL import Image
 
 from .date_parser import ParsedDate, parse_date_candidates
 from .detector import CandidateRegion, StampDetector
+from .external_tools import resolve_tesseract
 
 
 @dataclass
@@ -30,9 +31,10 @@ class HybridRecognizer:
         )
         self.yolo_model = None
         self.ollama_available: bool | None = None
-        command = config["tesseract"].get("command", "").strip()
-        if command:
-            pytesseract.pytesseract.tesseract_cmd = command
+        command = config["tesseract"].get("command", "")
+        self.tesseract_executable = resolve_tesseract(command)
+        if self.tesseract_executable:
+            pytesseract.pytesseract.tesseract_cmd = self.tesseract_executable
 
     def recognize(self, path: str | Path) -> RecognitionResult:
         raw_text: list[str] = []
@@ -123,6 +125,14 @@ class HybridRecognizer:
         ]
 
     def _tesseract(self, region: CandidateRegion) -> tuple[str, float]:
+        if not self.tesseract_executable:
+            configured = str(self.config["tesseract"].get("command", "")).strip()
+            hint = f" Указанный путь: {configured}" if configured else ""
+            raise FileNotFoundError(
+                "Tesseract OCR не найден. Укажите путь к tesseract.exe или папку "
+                f"его установки в настройках.{hint}"
+            )
+
         rgb = region.image
         scale = max(2, min(5, 1200 // max(1, rgb.shape[1])))
         enlarged = cv2.resize(rgb, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
@@ -167,7 +177,7 @@ class HybridRecognizer:
                 texts.append(" ".join(words))
                 confidence_scores.append(sum(scores) / len(scores) / 100.0)
 
-        return "\\n".join(texts), max(confidence_scores, default=0.0)
+        return "\n".join(texts), max(confidence_scores, default=0.0)
 
     def _yolo_regions(self, path: str | Path, cfg: dict) -> list[CandidateRegion]:
         from ultralytics import YOLO
