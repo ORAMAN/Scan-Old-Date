@@ -61,10 +61,14 @@ class HybridRecognizer:
         except Exception as exc:
             return RecognitionResult(str(path), [], [], [], [f"Detector: {exc}"])
 
-        for region in regions:
+        colour_region_count = sum(
+            1 for region in regions if region.label.startswith("yellow-stamp")
+        )
+        colour_candidate_found = False
+        for region_index, region in enumerate(regions):
+            region_candidates: list[ParsedDate] = []
             try:
                 reads = self._tesseract(region)
-                region_candidates: list[ParsedDate] = []
                 for read in reads:
                     parsed = self._parse(read.text)
                     if not parsed:
@@ -160,6 +164,34 @@ class HybridRecognizer:
                         "error": str(exc),
                     }
                 )
+
+            if region.label.startswith("yellow-stamp") and region_candidates:
+                colour_candidate_found = True
+
+            # A localized colour proposal already found a complete calendar date.
+            # Do not OCR the broad corner/edge crops again; retain their boxes in
+            # diagnostics so the user can still see which zones were not needed.
+            if (
+                colour_region_count
+                and region_index + 1 == colour_region_count
+                and colour_candidate_found
+            ):
+                for skipped in regions[region_index + 1 :]:
+                    diagnostics.append(
+                        {
+                            "bbox": list(skipped.bbox) if skipped.bbox else None,
+                            "label": skipped.label,
+                            "detector_score": round(float(skipped.score), 3),
+                            "ocr_text": "",
+                            "ocr_confidence": 0.0,
+                            "rotation": 0,
+                            "variant": "not-run",
+                            "reads": [],
+                            "dates": [],
+                            "skipped": True,
+                        }
+                    )
+                break
 
         yolo_cfg = self.config.get("yolo", {})
         if yolo_cfg.get("enabled"):
@@ -263,19 +295,22 @@ class HybridRecognizer:
         max_dimension = max(source_height, source_width)
         scale = max(2, min(10, 3000 // max(1, max_dimension)))
 
-        # Side strips and tight vertical stamp proposals are tried upright first.
+        # Use a single correct orientation for tight vertical colour proposals;
+        # broad edge zones get one rotated fallback, while wide stamps stay horizontal.
         aspect = source_width / max(1, source_height)
-        if aspect < 1.25:
-            rotations = (270, 0, 90)
-        elif aspect <= 1.8:
-            rotations = (0, 270, 90)
+        if region.label.startswith("yellow-stamp-vertical"):
+            rotations = (270, 0)
+        elif region.label in {"left-edge", "right-edge"}:
+            rotations = (270, 0)
+        elif aspect < 1.25:
+            rotations = (0, 270)
         else:
             rotations = (0,)
 
         cfg = self.config["tesseract"]
         lang = cfg.get("languages", "eng")
-        configured_psm = int(cfg.get("page_segmentation_mode", 11))
-        psm_values = list(dict.fromkeys((6, 7, configured_psm)))
+        configured_psm = int(cfg.get("page_segmentation_mode", 6))
+        psm_values = list(dict.fromkeys((6, configured_psm)))
         reads: list[_OCRRead] = []
 
         for angle in rotations:
