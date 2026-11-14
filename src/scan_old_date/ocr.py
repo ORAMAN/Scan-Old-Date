@@ -293,24 +293,23 @@ class HybridRecognizer:
         source = region.image
         source_height, source_width = source.shape[:2]
         max_dimension = max(source_height, source_width)
-        scale = max(2, min(10, 3000 // max(1, max_dimension)))
+        # Keep glyphs large enough for Tesseract without turning a small crop into
+        # a huge mostly-background image.
+        scale = max(3, min(6, 1800 // max(1, max_dimension)))
 
-        # Use a single correct orientation for tight vertical colour proposals;
-        # broad edge zones get one rotated fallback, while wide stamps stay horizontal.
-        aspect = source_width / max(1, source_height)
-        if region.label.startswith("yellow-stamp-vertical"):
+        if region.label == "yellow-stamp-vertical-components":
             rotations = (270, 0)
+        elif region.label == "yellow-stamp-horizontal-components":
+            rotations = (0,)
         elif region.label in {"left-edge", "right-edge"}:
             rotations = (270, 0)
-        elif aspect < 1.25:
-            rotations = (0, 270)
         else:
             rotations = (0,)
 
         cfg = self.config["tesseract"]
         lang = cfg.get("languages", "eng")
         configured_psm = int(cfg.get("page_segmentation_mode", 6))
-        psm_values = list(dict.fromkeys((6, configured_psm)))
+        psm_values = list(dict.fromkeys((6, 7, configured_psm)))
         reads: list[_OCRRead] = []
 
         for angle in rotations:
@@ -329,25 +328,27 @@ class HybridRecognizer:
                 interpolation=cv2.INTER_CUBIC,
             )
             gray = cv2.cvtColor(enlarged, cv2.COLOR_RGB2GRAY)
-            contrast = cv2.createCLAHE(
-                clipLimit=2.5, tileGridSize=(8, 8)
-            ).apply(gray)
+            otsu = cv2.threshold(
+                gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+            )[1]
 
             hsv = cv2.cvtColor(enlarged, cv2.COLOR_RGB2HSV)
+            # Match the same bright-yellow range used by the detector. This
+            # isolates the glyph fill from dark outlines and nearby photo details.
             yellow_mask = cv2.inRange(
                 hsv,
-                np.array([10, 55, 115], dtype=np.uint8),
-                np.array([52, 255, 255], dtype=np.uint8),
+                np.array([15, 70, 170], dtype=np.uint8),
+                np.array([42, 255, 255], dtype=np.uint8),
             )
-            yellow_ratio = float(np.count_nonzero(yellow_mask)) / max(
-                1, yellow_mask.size
+            yellow_mask = cv2.morphologyEx(
+                yellow_mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8)
             )
+
             variants: list[tuple[str, np.ndarray]] = [
                 ("gray", gray),
-                ("contrast", contrast),
+                ("otsu", otsu),
+                ("yellow-mask", yellow_mask),
             ]
-            if 0.0015 <= yellow_ratio <= 0.38:
-                variants.append(("yellow-mask", cv2.bitwise_not(yellow_mask)))
 
             orientation_found_date = False
             for variant_name, image in variants:
@@ -372,9 +373,6 @@ class HybridRecognizer:
                         word = word.strip()
                         if not word:
                             continue
-                        # Tesseract sometimes returns -1 confidence for a merged
-                        # token such as "1316AM". Keep numeric tokens anyway; only
-                        # nonnegative scores contribute to the confidence average.
                         if not (
                             any(character.isdigit() for character in word)
                             or word.upper() in {"AM", "PM"}
@@ -394,7 +392,7 @@ class HybridRecognizer:
                     confidence = (
                         sum(date_scores) / len(date_scores) / 100.0
                         if date_scores
-                        else 0.35
+                        else 0.30
                     )
                     reads.append(
                         _OCRRead(
@@ -405,14 +403,14 @@ class HybridRecognizer:
                             psm,
                         )
                     )
+
+                    # A calendar-valid date is stronger evidence than OCR's raw
+                    # confidence. Stop at the first valid full read for this crop.
                     if self._parse(text):
                         orientation_found_date = True
                         break
                 if orientation_found_date:
                     break
-
-            # Once one orientation yields a calendar-valid date, the remaining
-            # rotations are unlikely to add value and may create false alternatives.
             if orientation_found_date:
                 break
 
