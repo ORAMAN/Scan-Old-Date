@@ -14,7 +14,7 @@ def test_detector_includes_bottom_corners_and_side_strips(tmp_path):
         (2, 27),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.45,
-        (0, 255, 255),
+        (255, 255, 0),
         1,
         cv2.LINE_AA,
     )
@@ -55,7 +55,7 @@ def test_detector_keeps_bottom_right_search_area_even_with_colour_noise(tmp_path
         (320, 380),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
-        (0, 255, 255),
+        (255, 255, 0),
         2,
         cv2.LINE_AA,
     )
