@@ -38,27 +38,31 @@ class PhotoScanner:
         db = ScanDatabase(self.config["database"]["path"])
         try:
             for path in self.iter_images(root):
-                existing = read_exif_date(
+                # EXIF is retained for comparison only. It must never short-circuit
+                # visual recognition because legacy metadata can be wrong.
+                existing_exif = read_exif_date(
                     path, self.config["metadata"].get("exiftool_path", "exiftool")
                 )
-                if existing and self.config["scan"].get("skip_existing_exif_date", True):
-                    result = RecognitionResult(str(path), [], [existing], ["exif"], [])
-                    status, confidence = "existing-exif", None
-                    db.add_result(str(path), existing, confidence, existing, "exif", status)
-                else:
-                    result = self.recognizer.recognize(path)
-                    selected = result.candidates[0] if result.candidates else None
-                    confidence = selected.confidence if selected else None
-                    status = "review" if selected else "not-found"
-                    db.add_result(
-                        str(path),
-                        selected.value.isoformat() if selected else None,
-                        confidence,
-                        " | ".join(result.raw_text),
-                        ",".join(result.methods),
-                        status,
-                        "; ".join(result.errors),
-                    )
+                result = self.recognizer.recognize(path)
+                result.existing_exif_date = existing_exif
+
+                selected = result.candidates[0] if result.candidates else None
+                confidence = selected.confidence if selected else None
+                status = "review" if selected else "not-found"
+
+                details = list(result.errors)
+                if existing_exif:
+                    details.append(f"Existing EXIF date (reference only): {existing_exif}")
+
+                db.add_result(
+                    str(path),
+                    selected.value.isoformat() if selected else None,
+                    confidence,
+                    " | ".join(result.raw_text),
+                    ",".join(result.methods),
+                    status,
+                    "; ".join(details),
+                )
                 results.append(result)
                 if on_result:
                     on_result(result, status, confidence)
