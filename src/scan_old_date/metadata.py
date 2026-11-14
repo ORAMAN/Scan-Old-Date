@@ -17,6 +17,7 @@ def read_exif_date(path: str | Path, exiftool: str = "exiftool") -> str | None:
         try:
             result = subprocess.run(
                 [executable, "-s3", "-DateTimeOriginal", "-CreateDate", str(path)],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -89,7 +90,10 @@ def apply_date(
             f"-ModifyDate={exif_value}",
             str(path),
         ]
-        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
+        result = subprocess.run(
+            command, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            check=False, timeout=60,
+        )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "ExifTool failed")
         exif_written = True
