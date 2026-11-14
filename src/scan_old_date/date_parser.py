@@ -35,7 +35,8 @@ _DAY_FIRST = re.compile(
 )
 # Common compact LED camera stamp: M D 'YY, M-D-YY or M D YY.
 _LED_STAMP = re.compile(
-    r"(?<!\d)(\d{1,2})[ ./_-]+(\d{1,2})\s*['’]?\s*(\d{2})(?!\d)"
+    r"(?<!\d)(\d{1,2})(?!\d)[ ./_-]+(\d{1,2})(?!\d)"
+    r"\s*['’]?\s*(\d{2})(?!\d)"
 )
 
 
