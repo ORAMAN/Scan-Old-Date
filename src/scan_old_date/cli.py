@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -46,7 +47,21 @@ def main() -> None:
                 except Exception as exc:
                     print(f"       ERROR writing metadata: {exc}")
         else:
-            print(f"[NONE] {result.path}: stamp date not detected{exif_note}")
+            partial_pattern = re.compile(
+                r"(?<!\\d)(?:19|20)\\d{2}[./_-](?:0?[1-9]|1[0-2])(?:[./_-])?",
+                re.IGNORECASE,
+            )
+            partial_text = next(
+                (text for text in result.raw_text if partial_pattern.search(text)),
+                None,
+            )
+            if partial_text:
+                print(
+                    f"[PARTIAL] {result.path}: incomplete visible stamp "
+                    f"'{partial_text}'{exif_note}"
+                )
+            else:
+                print(f"[NONE] {result.path}: stamp date not detected{exif_note}")
 
     scanner.scan(args.folder, report)
 
