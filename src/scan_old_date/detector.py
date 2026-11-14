@@ -74,7 +74,7 @@ class StampDetector:
             near_side = gx < width * 0.20 or gx + gw > width * 0.80
             if (
                 near_side
-                and gy > height * 0.35
+                and gy > height * 0.60
                 and 3 <= gw <= max_glyph_width
                 and 3 <= gh <= max_glyph_height
                 and area >= 6
@@ -137,16 +137,16 @@ class StampDetector:
                 # Date stamps are usually printed near an edge. This also rejects
                 # many yellow objects and patterns in the centre of the photograph.
                 near_edge = (
-                    y < height * 0.32
-                    or y + box_height > height * 0.62
-                    or x < width * 0.24
-                    or x + box_width > width * 0.76
+                    y < height * 0.18
+                    or y + box_height > height * 0.72
+                    or x < width * 0.20
+                    or x + box_width > width * 0.80
                 )
                 if not near_edge:
                     continue
 
                 aspect = box_width / max(1, box_height)
-                if 0.72 < aspect < 1.45:
+                if 0.55 < aspect < 2.0:
                     continue
 
                 if aspect < 0.72:
