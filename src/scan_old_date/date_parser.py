@@ -15,7 +15,10 @@ class ParsedDate:
 
 
 # Some camera stamps have the time printed immediately after the date, with no space.
-_TIME_SUFFIX = r"(?:\s*\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\s*(?:AM|PM)?)?"
+_TIME_SUFFIX = (
+    r"(?:\s*\d{1,2}[:.]\d{2}(?:[:.]\d{2})?"
+    r"(?:\s*[AP]M?)?)?"
+)
 _YEAR_FIRST = re.compile(
     rf"(?<!\d)(20\d{{2}}|19\d{{2}})[./_\- ](\d{{1,2}})[./_\- ](\d{{1,2}}){_TIME_SUFFIX}(?!\d)",
     re.IGNORECASE,
