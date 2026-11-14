@@ -17,7 +17,7 @@ recognition:
 tesseract:
   command: ""
   languages: "eng"
-  page_segmentation_mode: 11
+  page_segmentation_mode: 6
 
 yolo:
   enabled: false
