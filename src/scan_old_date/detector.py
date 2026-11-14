@@ -47,7 +47,7 @@ class StampDetector:
             np.array([52, 255, 255], dtype=np.uint8),
         )
         yellow_orange = cv2.morphologyEx(
-            yellow_orange, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8)
+            yellow_raw, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8)
         )
 
         horizontal_width = max(11, min(41, width // 65))
