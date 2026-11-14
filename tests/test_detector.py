@@ -30,6 +30,10 @@ def test_detector_includes_bottom_corners_and_side_strips(tmp_path):
 
     assert "bottom-left" in by_label
     assert "left-edge" in by_label
+    assert any(
+        region.label == "yellow-stamp-vertical-components"
+        for region in regions
+    )
     assert by_label["bottom-left"].bbox is not None
     assert by_label["left-edge"].bbox is not None
 
