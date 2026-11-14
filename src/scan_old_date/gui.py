@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from copy import deepcopy
 from datetime import date
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .config import load_config, save_config
+from .config import default_config_path, load_config, save_config
 from .external_tools import resolve_exiftool, resolve_tesseract
 from .metadata import apply_date
 from .scanner import PhotoScanner
@@ -48,7 +49,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Scan-Old-Date")
         self.resize(1280, 780)
-        self.config_path = Path("config/settings.yaml")
+        self.config_path = default_config_path()
         self.config = load_config(self.config_path)
         self.row_meta: list[dict] = []
         self.worker: ScanWorker | None = None
@@ -140,9 +141,9 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.apply_button)
         layout.addLayout(controls)
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
-            ["Файл", "Дата (редактируется)", "Уверенность", "Статус", "Метод"]
+            ["Файл", "Дата по штампу (редактируется)", "Существующая EXIF-дата (справочно)", "Уверенность", "Статус", "Метод"]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -263,40 +264,43 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def add_result(self, result, status: str, confidence):
+        # The editable date must come only from visual stamp recognition.
         candidate = result.candidates[0] if result.candidates else None
-        existing_date = result.raw_text[0] if status == "existing-exif" and result.raw_text else ""
-        if existing_date:
-            date_text = existing_date[:10].replace(":", "-")
-        elif candidate and candidate.ambiguous:
+        if candidate and candidate.ambiguous:
             alternatives = list(dict.fromkeys(
                 item.value.isoformat()
                 for item in result.candidates
                 if item.ambiguous
             ))
-            date_text = " / ".join(alternatives)
+            stamp_date_text = " / ".join(alternatives)
         else:
-            date_text = candidate.value.isoformat() if candidate else ""
+            stamp_date_text = candidate.value.isoformat() if candidate else ""
 
+        existing_exif = getattr(result, "existing_exif_date", None) or ""
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(result.path))
-        date_item = QTableWidgetItem(date_text)
-        if status != "existing-exif" or self.config["metadata"].get("overwrite_existing", False):
-            date_item.setFlags(date_item.flags() | Qt.ItemFlag.ItemIsEditable)
-        else:
-            date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self.table.setItem(row, 1, date_item)
-        self.table.setItem(
-            row, 2, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else "")
+
+        date_item = QTableWidgetItem(stamp_date_text)
+        date_item.setFlags(date_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        date_item.setToolTip(
+            "Эта дата получена распознаванием видимого штампа. "
+            "EXIF не используется как источник даты съёмки."
         )
-        self.table.setItem(row, 3, QTableWidgetItem(status))
-        self.table.setItem(row, 4, QTableWidgetItem(", ".join(result.methods)))
+        self.table.setItem(row, 1, date_item)
+        self.table.setItem(row, 2, QTableWidgetItem(existing_exif))
+        self.table.setItem(
+            row, 3, QTableWidgetItem(f"{confidence:.2f}" if confidence is not None else "")
+        )
+        self.table.setItem(row, 4, QTableWidgetItem(status))
+        self.table.setItem(row, 5, QTableWidgetItem(", ".join(result.methods)))
+
         self.row_meta.append({
             "confidence": float(confidence or 0.0),
             "ambiguous": bool(candidate.ambiguous) if candidate else True,
             "manual": False,
-            "original_date": date_text,
-            "existing_exif": status == "existing-exif",
+            "original_date": stamp_date_text,
+            "existing_exif": bool(existing_exif),
         })
 
     def scan_finished(self, count: int):
@@ -347,8 +351,6 @@ class MainWindow(QMainWindow):
         prepared = []
         for row in selected:
             meta = self.row_meta[row]
-            if meta["existing_exif"] and not self.config["metadata"].get("overwrite_existing", False):
-                continue
             text = self.table.item(row, 1).text().strip()
             try:
                 parsed = date.fromisoformat(text)
@@ -369,16 +371,26 @@ class MainWindow(QMainWindow):
                 "Нет готовых дат. Исправьте дату вручную или проверьте настройки перезаписи EXIF."
             )
             return
+        files_with_exif = sum(1 for row, _, _ in prepared if self.row_meta[row]["existing_exif"])
+        warning = (
+            f"\n\nУ {files_with_exif} выбранных файлов уже есть EXIF-дата. "
+            "Она будет заменена датой, распознанной по штампу."
+            if files_with_exif else ""
+        )
         answer = QMessageBox.question(
             self, "Подтверждение",
-            f"Записать даты для {len(prepared)} файлов? Перед изменением будут созданы резервные копии.",
+            f"Записать даты по штампу для {len(prepared)} файлов?"
+            f"{warning}\n\nПеред изменением будут созданы резервные копии.",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        # Clicking Yes explicitly authorizes replacing a possibly incorrect existing EXIF date.
+        apply_config = deepcopy(self.config)
+        apply_config.setdefault("metadata", {})["overwrite_existing"] = True
         done = 0
         for row, path, value in prepared:
             try:
-                apply_date(path, value, self.config)
+                apply_date(path, value, apply_config)
                 self.table.item(row, 3).setText("applied")
                 done += 1
             except Exception as exc:
