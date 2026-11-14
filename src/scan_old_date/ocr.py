@@ -299,7 +299,7 @@ class HybridRecognizer:
 
         if region.label == "yellow-stamp-vertical-components":
             rotations = (270, 0)
-        elif region.label == "yellow-stamp-horizontal-components":
+        elif region.label.startswith("yellow-stamp-horizontal"):
             rotations = (0,)
         elif region.label in {"left-edge", "right-edge"}:
             rotations = (270, 0)
