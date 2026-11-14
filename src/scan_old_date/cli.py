@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import date
 from pathlib import Path
 
-from .config import load_config
+from .config import default_config_path, load_config
 from .metadata import apply_date
 from .scanner import PhotoScanner
 
@@ -13,7 +13,7 @@ from .scanner import PhotoScanner
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scan old photographs for visible date stamps.")
     parser.add_argument("folder", type=Path)
-    parser.add_argument("--config", type=Path, default=Path("config/settings.yaml"))
+    parser.add_argument("--config", type=Path, default=default_config_path())
     parser.add_argument("--apply", action="store_true", help="Apply high-confidence dates.")
     parser.add_argument("--dry-run", action="store_true", help="Only report; do not modify images.")
     args = parser.parse_args()
@@ -27,12 +27,15 @@ def main() -> None:
 
     def report(result, status: str, confidence: float | None) -> None:
         candidate = result.candidates[0] if result.candidates else None
-        if status == "existing-exif":
-            print(f"[SKIP] {result.path}: existing EXIF date")
-        elif candidate:
+        exif_note = (
+            f"; existing EXIF (reference only): {result.existing_exif_date}"
+            if result.existing_exif_date else ""
+        )
+        if candidate:
             state = "AUTO" if confidence is not None and confidence >= threshold and not candidate.ambiguous else "REVIEW"
-            print(f"[{state}] {result.path} -> {candidate.value.isoformat()} "
-                  f"(confidence={confidence:.2f}; methods={','.join(result.methods)})")
+            print(f"[{state}] {result.path} -> stamp: {candidate.value.isoformat()} "
+                  f"(confidence={confidence:.2f}; methods={','.join(result.methods)})"
+                  f"{exif_note}")
             if args.apply and not args.dry_run and state == "AUTO":
                 try:
                     apply_config = deepcopy(config)
@@ -43,7 +46,7 @@ def main() -> None:
                 except Exception as exc:
                     print(f"       ERROR writing metadata: {exc}")
         else:
-            print(f"[NONE] {result.path}: date not detected")
+            print(f"[NONE] {result.path}: stamp date not detected{exif_note}")
 
     scanner.scan(args.folder, report)
 
