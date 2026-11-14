@@ -61,6 +61,11 @@ def parse_date_candidates(
     # Avoid parsing the same substring twice as both a generic and LED pattern.
     led_spans: set[tuple[int, int]] = set()
     for match in _LED_STAMP.finditer(cleaned):
+        # Do not parse the month/day portion of YYYY/MM/DDhhmm as a separate
+        # compact MM/DD/YY camera date.
+        prefix = cleaned[: match.start()]
+        if re.search(r"(?<!\\d)(?:19|20)\\d{2}[./_-]\\s*$", prefix):
+            continue
         first, second, year_raw = map(int, match.groups())
         year = _expand_year(year_raw)
         led_spans.add(match.span())
