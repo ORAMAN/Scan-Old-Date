@@ -94,3 +94,29 @@ def test_detector_ignores_broad_yellow_noise_and_keeps_bounded_regions(tmp_path)
     regions = StampDetector(max_regions=16).detect(path)
     assert len(regions) <= 4
     assert all(region.image.size for region in regions)
+
+
+def test_detector_marks_short_stamp_cut_off_at_right_edge_as_partial(tmp_path):
+    image = np.zeros((480, 457, 3), dtype=np.uint8)
+    cv2.putText(
+        image,
+        "2009/09/13",
+        (370, 455),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (255, 255, 0),
+        1,
+        cv2.LINE_AA,
+    )
+    path = tmp_path / "partial-right-edge-stamp.jpg"
+    _save_rgb(path, image)
+
+    regions = StampDetector(max_regions=16).detect(path)
+
+    assert len(regions) == 1
+    assert regions[0].label == "yellow-stamp-horizontal-partial"
+    assert regions[0].bbox is not None
+    x1, y1, x2, y2 = regions[0].bbox
+    assert x1 > 350
+    assert x2 == 457
+    assert y1 < 455 < y2
