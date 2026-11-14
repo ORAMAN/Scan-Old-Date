@@ -359,6 +359,11 @@ class HybridRecognizer:
                             psm,
                         )
                     )
+                    # PSM 7 is tuned for the usual single-line camera stamp.
+                    # Retry with the configured segmentation mode only when
+                    # PSM 7 did not produce a valid calendar date.
+                    if psm == 7 and self._parse(text):
+                        break
 
         # Remove duplicate text produced by equivalent thresholding/PSM passes.
         unique: dict[tuple[str, int], _OCRRead] = {}
