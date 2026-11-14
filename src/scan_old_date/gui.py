@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         self.check_tools_button = QPushButton("Проверить пути")
         self.check_tools_button.clicked.connect(self.check_tools)
         self.save_settings_button = QPushButton("Сохранить настройки")
-        self.save_settings_button.clicked.connect(self.save_settings)
+        self.save_settings_button.clicked.connect(lambda: self.save_settings())
         tool_buttons.addWidget(self.check_tools_button)
         tool_buttons.addWidget(self.save_settings_button)
         tool_buttons.addStretch(1)
