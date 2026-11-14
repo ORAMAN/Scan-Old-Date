@@ -380,7 +380,12 @@ class MainWindow(QMainWindow):
         for index, item in enumerate(diagnostics, start=1):
             bbox = item.get("bbox")
             has_date = bool(item.get("dates"))
-            color = (30, 220, 90) if has_date else (255, 170, 35)
+            skipped = bool(item.get("skipped"))
+            color = (
+                (155, 155, 155)
+                if skipped
+                else ((30, 220, 90) if has_date else (255, 170, 35))
+            )
             if bbox and len(bbox) == 4:
                 x1, y1, x2, y2 = bbox
                 rectangle = (
@@ -403,7 +408,7 @@ class MainWindow(QMainWindow):
             line = (
                 f"#{index} {item.get('label', 'область')} | "
                 f"рамка: {x1}, {y1} — {x2}, {y2} | "
-                f"OCR: {item.get('ocr_text') or 'текст не найден'} | "
+                f"OCR: {('пропущен: дата уже найдена' if skipped else (item.get('ocr_text') or 'текст не найден'))} | "
                 f"уверенность OCR: {item.get('ocr_confidence', 0)} | "
                 f"поворот: {item.get('rotation', 0)}°"
             )
@@ -430,9 +435,10 @@ class MainWindow(QMainWindow):
         dialog.resize(1260, 900)
         layout = QVBoxLayout(dialog)
         note = QLabel(
-            "Зелёная рамка — область, в которой найден кандидат даты; "
-            "оранжевая — область проверялась, но дата не получена. "
-            "Рамки показывают фрагменты, переданные OCR, а не контуры отдельных символов."
+            "Зелёная рамка — в области найден кандидат даты; оранжевая — область "
+            "проверена, но дата не получена; серая — OCR не запускался, поскольку "
+            "дата уже найдена в локальной цветовой области. Рамки показывают фрагменты, "
+            "переданные OCR, а не контуры отдельных символов."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
