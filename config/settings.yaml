@@ -1,7 +1,8 @@
 scan:
   recursive: true
   extensions: [".jpg", ".jpeg", ".tif", ".tiff", ".png", ".webp", ".bmp"]
-  skip_existing_exif_date: true
+  # Existing EXIF metadata is informational; visual date-stamp recognition always runs.
+  skip_existing_exif_date: false
   min_year: 1950
   max_year: 2035
   default_time: "12:00:00"
