@@ -5,7 +5,11 @@ from PIL import Image
 from scan_old_date.detector import StampDetector
 
 
-def test_detector_includes_bottom_corners_and_side_strips(tmp_path):
+def _save_rgb(path, image):
+    Image.fromarray(image).save(path, quality=95)
+
+
+def test_detector_creates_tight_region_for_vertical_yellow_stamp(tmp_path):
     image = np.full((480, 360, 3), 30, dtype=np.uint8)
     stamp_line = np.zeros((36, 190, 3), dtype=np.uint8)
     cv2.putText(
@@ -23,45 +27,70 @@ def test_detector_includes_bottom_corners_and_side_strips(tmp_path):
     image[285 : 285 + stamp_height, 18 : 18 + stamp_width] = stamp
 
     path = tmp_path / "vertical-stamp.jpg"
-    Image.fromarray(image).save(path, quality=95)
+    _save_rgb(path, image)
 
     regions = StampDetector(max_regions=16).detect(path)
-    by_label = {region.label: region for region in regions}
 
-    assert "bottom-left" in by_label
-    assert "left-edge" in by_label
-    assert any(
-        region.label == "yellow-stamp-vertical-components"
-        for region in regions
-    )
-    assert by_label["bottom-left"].bbox is not None
-    assert by_label["left-edge"].bbox is not None
-
-    for region in regions:
-        assert region.bbox is not None
-        x1, y1, x2, y2 = region.bbox
-        assert region.image.shape[1] == x2 - x1
-        assert region.image.shape[0] == y2 - y1
+    assert len(regions) == 1
+    assert regions[0].label == "yellow-stamp-vertical-components"
+    assert regions[0].bbox is not None
+    x1, y1, x2, y2 = regions[0].bbox
+    assert x1 < 30
+    assert x2 - x1 < 55
+    assert y1 > 250
+    assert y2 == 480
+    assert regions[0].image.shape[1] == x2 - x1
+    assert regions[0].image.shape[0] == y2 - y1
 
 
-def test_detector_keeps_bottom_right_search_area_even_with_colour_noise(tmp_path):
+def test_detector_creates_tight_region_for_horizontal_yellow_stamp(tmp_path):
     image = np.zeros((400, 600, 3), dtype=np.uint8)
-    # Lots of bright pattern-like pixels should not displace fixed edge regions.
-    rng = np.random.default_rng(42)
-    image[:, :, :] = rng.integers(0, 255, size=image.shape, dtype=np.uint8)
     cv2.putText(
         image,
         "2009/08/07",
-        (320, 380),
+        (300, 380),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
+        0.65,
         (255, 255, 0),
         2,
         cv2.LINE_AA,
     )
-    path = tmp_path / "bottom-right-stamp.jpg"
-    Image.fromarray(image).save(path, quality=95)
+    path = tmp_path / "horizontal-stamp.jpg"
+    _save_rgb(path, image)
 
-    labels = [region.label for region in StampDetector(max_regions=16).detect(path)]
-    assert labels[0] == "bottom-right"
-    assert "bottom-left" in labels
+    regions = StampDetector(max_regions=16).detect(path)
+
+    assert len(regions) == 1
+    assert regions[0].label == "yellow-stamp-horizontal-components"
+    assert regions[0].bbox is not None
+    x1, y1, x2, y2 = regions[0].bbox
+    assert x2 == 600
+    assert y1 > 300
+    assert x2 - x1 < 400
+
+
+def test_detector_falls_back_to_edge_regions_when_stamp_colour_is_absent(tmp_path):
+    image = np.full((400, 600, 3), 100, dtype=np.uint8)
+    path = tmp_path / "no-yellow-stamp.jpg"
+    _save_rgb(path, image)
+
+    regions = StampDetector(max_regions=16).detect(path)
+    labels = [region.label for region in regions]
+
+    assert labels == ["bottom-right", "bottom-left", "right-edge", "left-edge"]
+    for region in regions:
+        assert region.bbox is not None
+
+
+def test_detector_ignores_broad_yellow_noise_and_keeps_bounded_regions(tmp_path):
+    image = np.full((400, 600, 3), 150, dtype=np.uint8)
+    rng = np.random.default_rng(42)
+    # Add a yellow/brown decorative patch without a long row or column of glyphs.
+    patch = rng.integers(100, 255, size=(150, 150, 3), dtype=np.uint8)
+    image[100:250, 420:570] = patch
+    path = tmp_path / "yellow-noise.jpg"
+    _save_rgb(path, image)
+
+    regions = StampDetector(max_regions=16).detect(path)
+    assert len(regions) <= 4
+    assert all(region.image.size for region in regions)
