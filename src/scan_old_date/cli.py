@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from datetime import date
 from pathlib import Path
 
@@ -34,8 +35,11 @@ def main() -> None:
                   f"(confidence={confidence:.2f}; methods={','.join(result.methods)})")
             if args.apply and not args.dry_run and state == "AUTO":
                 try:
-                    apply_date(result.path, candidate.value, config)
-                    print("       metadata and file timestamp updated")
+                    apply_config = deepcopy(config)
+                    # Explicit --apply authorizes replacing possibly incorrect EXIF values.
+                    apply_config.setdefault("metadata", {})["overwrite_existing"] = True
+                    apply_date(result.path, candidate.value, apply_config)
+                    print("       stamp date written to metadata and file timestamp updated")
                 except Exception as exc:
                     print(f"       ERROR writing metadata: {exc}")
         else:
