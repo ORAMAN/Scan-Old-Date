@@ -85,3 +85,35 @@ def test_existing_exif_date_is_not_used_when_stamp_is_not_found(tmp_path, monkey
     assert results[0].candidates == []
     assert results[0].existing_exif_date == "2005:06:07 08:09:10"
     assert statuses == ["not-found"]
+
+
+def test_incomplete_stamp_is_reported_as_partial_not_not_found(tmp_path, monkeypatch):
+    root = tmp_path / "photos"
+    root.mkdir()
+    photo = root / "partly-cropped-stamp.jpg"
+    photo.write_bytes(b"placeholder")
+
+    class FakeRecognizer:
+        def __init__(self, config):
+            pass
+
+        def recognize(self, path):
+            return RecognitionResult(
+                str(path),
+                [],
+                ["2008/09/"],
+                ["tesseract"],
+                [],
+            )
+
+    monkeypatch.setattr(scanner_module, "read_exif_date", lambda *args: None)
+    monkeypatch.setattr(scanner_module, "HybridRecognizer", FakeRecognizer)
+
+    statuses = []
+    results = scanner_module.PhotoScanner(_config(tmp_path)).scan(
+        root,
+        lambda result, status, confidence: statuses.append(status),
+    )
+
+    assert results[0].candidates == []
+    assert statuses == ["partial"]
