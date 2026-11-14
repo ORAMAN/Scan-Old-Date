@@ -69,11 +69,12 @@ class HybridRecognizer:
             region_candidates: list[ParsedDate] = []
             try:
                 reads = self._tesseract(region)
+                if any(read.text for read in reads):
+                    methods.append("tesseract")
                 for read in reads:
                     parsed = self._parse(read.text)
                     if not parsed:
                         continue
-                    methods.append("tesseract")
                     for item in parsed:
                         # The parser validates the calendar date. OCR confidence is
                         # combined additively rather than multiplied, which previously
