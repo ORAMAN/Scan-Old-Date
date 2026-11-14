@@ -26,6 +26,14 @@ _OCR_YEAR_FIRST = re.compile(
     rf"(?<!\d)(20\d{{2}}|19\d{{2}})[71](0[1-9]|1[0-2])[./_\-](0[1-9]|[12]\d|3[01]){_TIME_SUFFIX}(?!\d)",
     re.IGNORECASE,
 )
+# A common Tesseract failure on narrow vertical stamps: the slash/space is
+# preserved after the year, but the day and compact time are glued together,
+# e.g. "2009/06/ 1316AM" for 2009/06/13 01:36 AM.
+_YEAR_FIRST_SPACED = re.compile(
+    r"(?<!\\d)(20\\d{2}|19\\d{2})[./_-]\\s*(\\d{1,2})[./_-]\\s*(\\d{2})"
+    r"\\s*\\d{2,4}\\s*(?:AM|PM)(?![A-Z])",
+    re.IGNORECASE,
+)
 _DAY_FIRST = re.compile(
     rf"(?<!\d)(\d{{1,2}})[./_\- ](\d{{1,2}})[./_\- ](\d{{2}}|\d{{4}}){_TIME_SUFFIX}(?!\d)",
     re.IGNORECASE,
@@ -54,6 +62,10 @@ def parse_date_candidates(
     for match in _OCR_YEAR_FIRST.finditer(cleaned):
         year, month, day = map(int, match.groups()[:3])
         _append(found, year, month, day, match.group(), 0.78, min_year, max_year)
+
+    for match in _YEAR_FIRST_SPACED.finditer(cleaned):
+        year, month, day = map(int, match.groups())
+        _append(found, year, month, day, match.group(), 0.80, min_year, max_year)
 
     # Avoid parsing the same substring twice as both a generic and LED pattern.
     led_spans: set[tuple[int, int]] = set()
