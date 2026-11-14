@@ -58,3 +58,8 @@ def test_camera_stamp_without_space_before_full_am_pm_time():
     result = parse_date_candidates("2009/08/0704:57PM")
     assert result
     assert result[0].value == date(2009, 8, 7)
+
+
+def test_malformed_year_first_stamp_is_not_reinterpreted_as_day_first():
+    assert parse_date_candidates("2009/05/3126AM") == []
+    assert parse_date_candidates("2009/06/ 3126AM") == []
