@@ -30,7 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "use_color_candidates": True,
         "use_corner_candidates": True,
     },
-    "tesseract": {"command": "", "languages": "eng", "page_segmentation_mode": 11},
+    "tesseract": {"command": "", "languages": "eng", "page_segmentation_mode": 6},
     "yolo": {"enabled": False, "weights": "models/date-stamp-detector.pt", "confidence": 0.25},
     "ollama": {
         "enabled": True,
