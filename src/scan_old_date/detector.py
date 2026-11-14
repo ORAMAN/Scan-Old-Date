@@ -88,15 +88,23 @@ class StampDetector:
                 if 0.72 < aspect < 1.45:
                     continue
 
-                pad_x = max(16, int(box_width * 0.16))
-                pad_y = max(12, int(box_height * 0.38))
+                if aspect < 0.72:
+                    # Vertical stamp: keep the narrow glyph column tight. A large
+                    # side margin floods OCR with unrelated tablecloth/food pixels.
+                    pad_x = max(4, int(box_width * 0.12))
+                    pad_y = max(10, int(box_height * 0.10))
+                    label = "yellow-stamp-vertical"
+                else:
+                    pad_x = max(12, int(box_width * 0.10))
+                    pad_y = max(8, int(box_height * 0.28))
+                    label = "yellow-stamp-horizontal"
                 box = (
                     max(0, x - pad_x),
                     max(0, y - pad_y),
                     min(width, x + box_width + pad_x),
                     min(height, y + box_height + pad_y),
                 )
-                region = self._make_region(rgb, "yellow-stamp", box, 0.82)
+                region = self._make_region(rgb, label, box, 0.84)
                 if region is not None:
                     colour_proposals.append(region)
 
