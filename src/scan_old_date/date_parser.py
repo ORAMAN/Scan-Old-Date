@@ -64,7 +64,13 @@ def parse_date_candidates(
         # Do not parse the month/day portion of YYYY/MM/DDhhmm as a separate
         # compact MM/DD/YY camera date.
         prefix = cleaned[: match.start()]
-        if re.search(r"(?<!\d)(?:19|20)\d{2}[./_-]\s*$", prefix):
+        if (
+            re.search(r"(?<!\d)(?:19|20)\d{2}[./_-]\s*$", prefix)
+            or re.search(
+                r"(?<!\d)(?:19|20)\d{2}[./_-]\d{1,2}[./_-]\d{1,2}\s*$",
+                prefix,
+            )
+        ):
             continue
         first, second, year_raw = map(int, match.groups())
         year = _expand_year(year_raw)
