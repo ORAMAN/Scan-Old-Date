@@ -198,7 +198,13 @@ class StampDetector:
                 continue
 
             median_height = float(np.median([item[3] for item in group]))
-            partial_at_right_edge = x2 >= width - 12 and span_x < width * 0.25
+            # JPEG antialiasing and clipped glyph strokes can move the detected
+            # component edge inward by several pixels. Use a relative edge zone.
+            partial_at_right_edge = (
+                x2 >= width * 0.88
+                and x1 >= width * 0.60
+                and span_x < width * 0.40
+            )
             if partial_at_right_edge:
                 # Keep every detected glyph. The photo boundary already truncates the
                 # right side; shifting x1 inward by a few pixels cropped the first glyph.
