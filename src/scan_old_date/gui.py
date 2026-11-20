@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
@@ -10,7 +10,8 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSplitter, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from PIL import Image, ImageDraw, ImageOps
@@ -93,14 +94,9 @@ class MainWindow(QMainWindow):
         exif_file_button.clicked.connect(
             lambda: self.choose_tool_file(self.exiftool_path_input, "ExifTool")
         )
-        exif_folder_button = QPushButton("Папка…")
-        exif_folder_button.clicked.connect(
-            lambda: self.choose_tool_folder(self.exiftool_path_input, "ExifTool")
-        )
         tools_layout.addWidget(exif_file_button, 0, 2)
-        tools_layout.addWidget(exif_folder_button, 0, 3)
         self.exiftool_status = QLabel("Не проверено")
-        tools_layout.addWidget(self.exiftool_status, 0, 4)
+        tools_layout.addWidget(self.exiftool_status, 0, 3)
 
         tools_layout.addWidget(QLabel("Tesseract OCR:"), 1, 0)
         tools_layout.addWidget(self.tesseract_path_input, 1, 1)
@@ -108,14 +104,9 @@ class MainWindow(QMainWindow):
         tess_file_button.clicked.connect(
             lambda: self.choose_tool_file(self.tesseract_path_input, "Tesseract OCR")
         )
-        tess_folder_button = QPushButton("Папка…")
-        tess_folder_button.clicked.connect(
-            lambda: self.choose_tool_folder(self.tesseract_path_input, "Tesseract OCR")
-        )
         tools_layout.addWidget(tess_file_button, 1, 2)
-        tools_layout.addWidget(tess_folder_button, 1, 3)
         self.tesseract_status = QLabel("Не проверено")
-        tools_layout.addWidget(self.tesseract_status, 1, 4)
+        tools_layout.addWidget(self.tesseract_status, 1, 3)
 
         tools_layout.setColumnStretch(1, 1)
         layout.addWidget(tools_group)
@@ -147,11 +138,12 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.apply_button)
         layout.addLayout(controls)
 
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             [
                 "Файл",
-                "Дата по штампу (редактируется)",
+                "Дата по штампу",
+                "Время по штампу",
                 "Существующая EXIF-дата (справочно)",
                 "Уверенность",
                 "Статус",
@@ -163,11 +155,42 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self.on_item_changed)
         self.table.cellDoubleClicked.connect(self.show_region_preview)
+        self.table.itemSelectionChanged.connect(self.update_inline_preview)
         self.table.setToolTip(
-            "Двойной щелчок по строке или кнопка «Показать рамки штампа» "
-            "открывает фотографию с прямоугольниками областей OCR."
+            "Выберите строку, чтобы увидеть исходное фото, рамки и фрагменты для OCR. "
+            "Двойной щелчок открывает подробную диагностику."
         )
-        layout.addWidget(self.table, 1)
+
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.addWidget(self.table)
+        preview_group = QGroupBox("Предпросмотр распознавания")
+        preview_layout = QVBoxLayout(preview_group)
+        self.preview_image_label = QLabel("Выберите строку с фотографией")
+        self.preview_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image_label.setMinimumSize(360, 250)
+        self.preview_image_label.setStyleSheet(
+            "QLabel { background: #20242b; color: #d7dce2; border: 1px solid #505762; }"
+        )
+        preview_layout.addWidget(self.preview_image_label, 1)
+        preview_note = QLabel(
+            "Зелёный — найдена дата; оранжевый — дата не распознана; серый — OCR пропущен."
+        )
+        preview_note.setWordWrap(True)
+        preview_layout.addWidget(preview_note)
+        self.region_scroll = QScrollArea()
+        self.region_scroll.setWidgetResizable(True)
+        self.region_scroll.setMinimumHeight(145)
+        self.region_thumbnails = QWidget()
+        self.region_thumbnails_layout = QHBoxLayout(self.region_thumbnails)
+        self.region_thumbnails_layout.setContentsMargins(4, 4, 4, 4)
+        self.region_thumbnails_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.region_scroll.setWidget(self.region_thumbnails)
+        preview_layout.addWidget(self.region_scroll)
+        content_splitter.addWidget(preview_group)
+        content_splitter.setStretchFactor(0, 4)
+        content_splitter.setStretchFactor(1, 2)
+        content_splitter.setSizes([850, 430])
+        layout.addWidget(content_splitter, 1)
         self.status = QLabel(
             "Готово. Сначала выполните Dry Run. Дата редактируется в формате ГГГГ-ММ-ДД. "
             "Двойной щелчок по строке показывает рамки областей OCR."
@@ -193,14 +216,6 @@ class MainWindow(QMainWindow):
         )
         if path:
             field.setText(path)
-            self.refresh_tool_status()
-
-    def choose_tool_folder(self, field: QLineEdit, tool_name: str):
-        folder = QFileDialog.getExistingDirectory(
-            self, f"Выберите папку установки — {tool_name}"
-        )
-        if folder:
-            field.setText(folder)
             self.refresh_tool_status()
 
     def sync_tool_settings(self):
@@ -293,6 +308,10 @@ class MainWindow(QMainWindow):
         )
         existing_exif = getattr(result, "existing_exif_date", None) or ""
         regions = getattr(result, "region_diagnostics", []) or []
+        stamp_time_text = (
+            candidate.captured_time.strftime("%H:%M:%S")
+            if candidate and candidate.captured_time else ""
+        )
 
         row = self.table.rowCount()
         self.table.insertRow(row)
@@ -315,17 +334,23 @@ class MainWindow(QMainWindow):
             tooltip += "\nДругие варианты OCR: " + ", ".join(alternatives[1:])
         date_item.setToolTip(tooltip)
         self.table.setItem(row, 1, date_item)
-        self.table.setItem(row, 2, QTableWidgetItem(existing_exif))
+        time_item = QTableWidgetItem(stamp_time_text)
+        time_item.setFlags(time_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        time_item.setToolTip(
+            "Время с фотоштaмпа в формате ЧЧ:ММ:СС. Оставьте пустым, если оно не напечатано."
+        )
+        self.table.setItem(row, 2, time_item)
+        self.table.setItem(row, 3, QTableWidgetItem(existing_exif))
         self.table.setItem(
             row,
-            3,
+            4,
             QTableWidgetItem(
                 f"{confidence:.2f}" if confidence is not None else ""
             ),
         )
-        self.table.setItem(row, 4, QTableWidgetItem(status))
-        self.table.setItem(row, 5, QTableWidgetItem(", ".join(result.methods)))
-        self.table.setItem(row, 6, QTableWidgetItem(str(len(regions))))
+        self.table.setItem(row, 5, QTableWidgetItem(status))
+        self.table.setItem(row, 6, QTableWidgetItem(", ".join(result.methods)))
+        self.table.setItem(row, 7, QTableWidgetItem(str(len(regions))))
 
         self.row_meta.append(
             {
@@ -333,10 +358,110 @@ class MainWindow(QMainWindow):
                 "ambiguous": bool(candidate.ambiguous) if candidate else True,
                 "manual": False,
                 "original_date": stamp_date_text,
+                "original_time": stamp_time_text,
                 "existing_exif": bool(existing_exif),
                 "regions": regions,
             }
         )
+        self.table.setCurrentCell(row, 0)
+
+    @staticmethod
+    def _image_to_pixmap(image: Image.Image) -> QPixmap:
+        rgb = image.convert("RGB")
+        image_bytes = rgb.tobytes("raw", "RGB")
+        qimage = QImage(
+            image_bytes,
+            rgb.width,
+            rgb.height,
+            rgb.width * 3,
+            QImage.Format.Format_RGB888,
+        ).copy()
+        return QPixmap.fromImage(qimage)
+
+    def _clear_region_thumbnails(self):
+        while self.region_thumbnails_layout.count():
+            entry = self.region_thumbnails_layout.takeAt(0)
+            widget = entry.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def update_inline_preview(self):
+        selected = sorted(
+            {index.row() for index in self.table.selectionModel().selectedRows()}
+        )
+        row = selected[0] if selected else self.table.currentRow()
+        if row < 0 or row >= len(self.row_meta):
+            self.preview_image_label.setPixmap(QPixmap())
+            self.preview_image_label.setText("Выберите строку с фотографией")
+            self._clear_region_thumbnails()
+            return
+
+        path_item = self.table.item(row, 0)
+        if path_item is None:
+            return
+        path = path_item.text()
+        diagnostics = self.row_meta[row].get("regions", [])
+        self._clear_region_thumbnails()
+
+        try:
+            with Image.open(path) as source:
+                original = ImageOps.exif_transpose(source).convert("RGB")
+
+            preview = original.copy()
+            draw = ImageDraw.Draw(preview)
+            line_width = max(2, int(round(min(original.size) / 450)))
+            for index, region in enumerate(diagnostics, start=1):
+                bbox = region.get("bbox")
+                if not bbox or len(bbox) != 4:
+                    continue
+                x1, y1, x2, y2 = map(int, bbox)
+                color = (
+                    (155, 155, 155)
+                    if region.get("skipped")
+                    else ((30, 220, 90) if region.get("dates") else (255, 170, 35))
+                )
+                draw.rectangle((x1, y1, x2, y2), outline=color, width=line_width)
+                draw.text(
+                    (max(0, x1 + 2), max(0, y1 - 15)),
+                    f"#{index}",
+                    fill=color,
+                    stroke_width=1,
+                    stroke_fill=(0, 0, 0),
+                )
+
+            preview.thumbnail((560, 370), Image.Resampling.LANCZOS)
+            self.preview_image_label.setText("")
+            self.preview_image_label.setPixmap(self._image_to_pixmap(preview))
+
+            for index, region in enumerate(diagnostics, start=1):
+                bbox = region.get("bbox")
+                if not bbox or len(bbox) != 4:
+                    continue
+                x1, y1, x2, y2 = map(int, bbox)
+                crop = original.crop((x1, y1, x2, y2))
+                crop.thumbnail((170, 92), Image.Resampling.LANCZOS)
+
+                thumb_widget = QWidget()
+                thumb_layout = QVBoxLayout(thumb_widget)
+                thumb_layout.setContentsMargins(3, 3, 3, 3)
+                image_label = QLabel()
+                image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                image_label.setFixedSize(176, 98)
+                image_label.setPixmap(self._image_to_pixmap(crop))
+                caption = QLabel(
+                    f"#{index} {region.get('label', 'область')}\n"
+                    f"{region.get('ocr_text') or 'текст не найден'}"
+                )
+                caption.setWordWrap(True)
+                caption.setMaximumWidth(184)
+                caption.setMaximumHeight(48)
+                thumb_layout.addWidget(image_label)
+                thumb_layout.addWidget(caption)
+                self.region_thumbnails_layout.addWidget(thumb_widget)
+
+        except Exception as exc:
+            self.preview_image_label.setPixmap(QPixmap())
+            self.preview_image_label.setText(f"Не удалось открыть фото: {exc}")
 
     def show_selected_preview(self):
         selected = sorted(
@@ -483,20 +608,26 @@ class MainWindow(QMainWindow):
         self.worker = None
 
     def on_item_changed(self, item):
-        if item.column() != 1:
+        if item.column() not in (1, 2):
             return
         row = item.row()
         if row < len(self.row_meta):
             meta = self.row_meta[row]
-            meta["manual"] = item.text().strip() != meta["original_date"]
+            current_date = self.table.item(row, 1).text().strip()
+            current_time = self.table.item(row, 2).text().strip()
+            meta["manual"] = (
+                current_date != meta["original_date"]
+                or current_time != meta["original_time"]
+            )
+            confidence_item = self.table.item(row, 4)
             if meta["manual"]:
-                self.table.item(row, 3).setText("manual")
-                self.table.item(row, 3).setToolTip(
-                    "Дата изменена вручную. Она будет применена после общего подтверждения."
+                confidence_item.setText("manual")
+                confidence_item.setToolTip(
+                    "Дата или время изменены вручную. Значения будут записаны после подтверждения."
                 )
             else:
-                self.table.item(row, 3).setText(f"{meta['confidence']:.2f}")
-                self.table.item(row, 3).setToolTip("Оценка OCR.")
+                confidence_item.setText(f"{meta['confidence']:.2f}")
+                confidence_item.setToolTip("Оценка OCR.")
 
     def apply_selected(self):
         if self.dry_run.isChecked():
@@ -532,10 +663,22 @@ class MainWindow(QMainWindow):
             try:
                 parsed = date.fromisoformat(text)
             except ValueError:
-                self.table.item(row, 3).setText("invalid-date")
+                self.table.item(row, 5).setText("invalid-date")
                 continue
 
-            item = (row, self.table.item(row, 0).text(), parsed)
+            time_text = self.table.item(row, 2).text().strip()
+            parsed_time = None
+            if time_text:
+                try:
+                    parsed_time = datetime.strptime(time_text, "%H:%M:%S").time()
+                except ValueError:
+                    try:
+                        parsed_time = datetime.strptime(time_text, "%H:%M").time()
+                    except ValueError:
+                        self.table.item(row, 5).setText("invalid-time")
+                        continue
+
+            item = (row, self.table.item(row, 0).text(), parsed, parsed_time)
             if not meta["manual"] and (
                 meta["ambiguous"]
                 or meta["confidence"]
@@ -548,7 +691,8 @@ class MainWindow(QMainWindow):
         if requires_confirmation:
             preview_lines = [
                 f"• {Path(path).name}: {value.isoformat()}"
-                for _, path, value in requires_confirmation[:8]
+                + (f" {stamp_time.isoformat()}" if stamp_time else "")
+                for _, path, value, stamp_time in requires_confirmation[:8]
             ]
             if len(requires_confirmation) > 8:
                 preview_lines.append(
@@ -577,7 +721,7 @@ class MainWindow(QMainWindow):
             return
 
         files_with_exif = sum(
-            1 for row, _, _ in prepared if self.row_meta[row]["existing_exif"]
+            1 for row, _, _, _ in prepared if self.row_meta[row]["existing_exif"]
         )
         warning = (
             f"\n\nУ {files_with_exif} выбранных файлов уже есть EXIF-дата. "
@@ -598,13 +742,13 @@ class MainWindow(QMainWindow):
         # The user's explicit confirmation authorizes replacing possibly incorrect EXIF.
         apply_config.setdefault("metadata", {})["overwrite_existing"] = True
         done = 0
-        for row, path, value in prepared:
+        for row, path, value, stamp_time in prepared:
             try:
-                apply_date(path, value, apply_config)
-                self.table.item(row, 3).setText("applied")
+                apply_date(path, value, apply_config, stamp_time)
+                self.table.item(row, 5).setText("applied")
                 done += 1
             except Exception as exc:
-                self.table.item(row, 3).setText(f"error: {exc}")
+                self.table.item(row, 5).setText(f"error: {exc}")
         self.status.setText(f"Применено: {done} из {len(prepared)}")
 
 
