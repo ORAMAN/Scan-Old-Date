@@ -34,7 +34,10 @@ def main() -> None:
         )
         if candidate:
             state = "AUTO" if confidence is not None and confidence >= threshold and not candidate.ambiguous else "REVIEW"
-            print(f"[{state}] {result.path} -> stamp: {candidate.value.isoformat()} "
+            stamp_text = candidate.value.isoformat()
+            if candidate.captured_time:
+                stamp_text += " " + candidate.captured_time.isoformat()
+            print(f"[{state}] {result.path} -> stamp: {stamp_text} "
                   f"(confidence={confidence:.2f}; methods={','.join(result.methods)})"
                   f"{exif_note}")
             if args.apply and not args.dry_run and state == "AUTO":
@@ -42,7 +45,9 @@ def main() -> None:
                     apply_config = deepcopy(config)
                     # Explicit --apply authorizes replacing possibly incorrect EXIF values.
                     apply_config.setdefault("metadata", {})["overwrite_existing"] = True
-                    apply_date(result.path, candidate.value, apply_config)
+                    apply_date(
+                        result.path, candidate.value, apply_config, candidate.captured_time
+                    )
                     print("       stamp date written to metadata and file timestamp updated")
                 except Exception as exc:
                     print(f"       ERROR writing metadata: {exc}")
