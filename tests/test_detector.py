@@ -118,5 +118,6 @@ def test_detector_marks_short_stamp_cut_off_at_right_edge_as_partial(tmp_path):
     assert regions[0].bbox is not None
     x1, y1, x2, y2 = regions[0].bbox
     assert x1 > 350
+    assert x1 < 370  # Crop starts before the first visible glyph instead of cutting it.
     assert x2 == 457
     assert y1 < 455 < y2

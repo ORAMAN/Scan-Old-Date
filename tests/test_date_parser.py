@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 
 from scan_old_date.date_parser import best_unambiguous, parse_date_candidates
 
@@ -63,3 +63,30 @@ def test_camera_stamp_without_space_before_full_am_pm_time():
 def test_malformed_year_first_stamp_is_not_reinterpreted_as_day_first():
     assert parse_date_candidates("2009/05/3126AM") == []
     assert parse_date_candidates("2009/06/ 3126AM") == []
+
+
+def test_attached_camera_time_with_pm_is_parsed_as_24_hour_time():
+    result = parse_date_candidates("2009/08/0704:57PM")
+    assert result[0].captured_time == time(16, 57)
+
+
+def test_attached_camera_time_with_am_is_preserved():
+    result = parse_date_candidates("2009/06/1301:36A")
+    assert result[0].captured_time == time(1, 36)
+
+
+def test_twelve_am_is_midnight_and_twelve_pm_is_noon():
+    midnight = parse_date_candidates("2009/08/0712:15AM")
+    noon = parse_date_candidates("2009/08/0712:15PM")
+    assert midnight[0].captured_time == time(0, 15)
+    assert noon[0].captured_time == time(12, 15)
+
+
+def test_24_hour_time_with_seconds_is_parsed():
+    result = parse_date_candidates("2009-08-07 21:05:43")
+    assert result[0].captured_time == time(21, 5, 43)
+
+
+def test_date_without_time_keeps_time_empty():
+    result = parse_date_candidates("2009-08-07")
+    assert result[0].captured_time is None

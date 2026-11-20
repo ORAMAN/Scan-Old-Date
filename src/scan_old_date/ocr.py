@@ -83,13 +83,15 @@ class HybridRecognizer:
                             0.99,
                             item.confidence * 0.68
                             + read.confidence * 0.24
-                            + region.score * 0.08,
+                            + region.score * 0.08
+                            + (0.015 if item.captured_time else 0.0),
                         )
                         scored = ParsedDate(
                             item.value,
                             score,
                             item.source_text,
                             item.ambiguous,
+                            item.captured_time,
                         )
                         candidates.append(scored)
                         region_candidates.append(scored)
@@ -97,6 +99,7 @@ class HybridRecognizer:
                 best_read = max(
                     reads,
                     key=lambda item: (
+                        any(candidate.captured_time for candidate in self._parse(item.text)),
                         bool(self._parse(item.text)),
                         item.confidence,
                     ),
@@ -128,6 +131,10 @@ class HybridRecognizer:
                             for item in sorted(
                                 reads,
                                 key=lambda value: (
+                                    any(
+                                        candidate.captured_time
+                                        for candidate in self._parse(value.text)
+                                    ),
                                     bool(self._parse(value.text)),
                                     value.confidence,
                                 ),
@@ -137,6 +144,7 @@ class HybridRecognizer:
                         "dates": [
                             {
                                 "value": item.value.isoformat(),
+                                "time": item.captured_time.isoformat() if item.captured_time else None,
                                 "confidence": round(float(item.confidence), 3),
                                 "ambiguous": bool(item.ambiguous),
                                 "source_text": item.source_text,
@@ -208,16 +216,19 @@ class HybridRecognizer:
                 errors.append(f"YOLO: {exc}")
 
         # A repeated OCR read of the same date is one result, not several alternatives.
-        best_by_date: dict[object, ParsedDate] = {}
+        best_by_date: dict[tuple[object, object], ParsedDate] = {}
         for item in candidates:
-            current = best_by_date.get(item.value)
+            key = (item.value, item.captured_time)
+            current = best_by_date.get(key)
             if current is None or item.confidence > current.confidence:
-                best_by_date[item.value] = item
+                best_by_date[key] = item
 
         ollama_cfg = self.config.get("ollama", {})
         ranked_before_vision = sorted(
             best_by_date.values(),
-            key=lambda item: (item.confidence, not item.ambiguous),
+            key=lambda item: (
+                item.confidence, item.captured_time is not None, not item.ambiguous
+            ),
             reverse=True,
         )
         if ollama_cfg.get("enabled") and (
@@ -236,10 +247,12 @@ class HybridRecognizer:
                                 min(0.78, item.confidence),
                                 item.source_text,
                                 item.ambiguous,
+                                item.captured_time,
                             )
-                            current = best_by_date.get(item.value)
+                            key = (item.value, item.captured_time)
+                            current = best_by_date.get(key)
                             if current is None or vision_candidate.confidence > current.confidence:
-                                best_by_date[item.value] = vision_candidate
+                                best_by_date[key] = vision_candidate
                 else:
                     errors.append(
                         "Ollama or the configured vision model is unavailable."
@@ -249,7 +262,9 @@ class HybridRecognizer:
 
         ranked = sorted(
             best_by_date.values(),
-            key=lambda item: (item.confidence, not item.ambiguous),
+            key=lambda item: (
+                item.confidence, item.captured_time is not None, not item.ambiguous
+            ),
             reverse=True,
         )
         return RecognitionResult(
@@ -278,6 +293,7 @@ class HybridRecognizer:
                 min(0.99, item.confidence * 0.68 + ocr_confidence * 0.24 + 0.08 * 0.60),
                 item.source_text,
                 item.ambiguous,
+                item.captured_time,
             )
             for item in candidates
         ]
@@ -299,11 +315,11 @@ class HybridRecognizer:
         scale = max(2, min(4, 1600 // max(1, max_dimension)))
 
         if region.label == "yellow-stamp-vertical-components":
-            rotations = (270, 0)
+            rotations = (270, 90, 0)
         elif region.label.startswith("yellow-stamp-horizontal"):
-            rotations = (0,)
+            rotations = (0, 180)
         elif region.label in {"left-edge", "right-edge"}:
-            rotations = (270, 0)
+            rotations = (270, 90, 0)
         else:
             rotations = (0,)
 
@@ -320,6 +336,31 @@ class HybridRecognizer:
                 oriented = cv2.rotate(source, cv2.ROTATE_90_COUNTERCLOCKWISE)
             else:
                 oriented = source
+
+            # Give Tesseract breathing room around tightly detected glyphs. The
+            # median edge colour blends with the crop and avoids hard-clipping text.
+            edge_pixels = np.concatenate(
+                (
+                    oriented[0, :, :],
+                    oriented[-1, :, :],
+                    oriented[:, 0, :],
+                    oriented[:, -1, :],
+                ),
+                axis=0,
+            )
+            border_colour = tuple(
+                int(value) for value in np.median(edge_pixels, axis=0)
+            )
+            border = max(12, min(36, int(round(max(oriented.shape[:2]) * 0.08))))
+            oriented = cv2.copyMakeBorder(
+                oriented,
+                border,
+                border,
+                border,
+                border,
+                cv2.BORDER_CONSTANT,
+                value=border_colour,
+            )
 
             enlarged = cv2.resize(
                 oriented,
@@ -410,9 +451,12 @@ class HybridRecognizer:
                         )
                     )
 
-                    # A calendar-valid date is stronger evidence than OCR's raw
-                    # confidence. Stop at the first valid full read for this crop.
-                    if self._parse(text):
+                    # Calendar-valid date and time are stronger evidence than raw
+                    # OCR confidence. Continue past date-only reads when possible.
+                    parsed_text = self._parse(text)
+                    # A date-only read must not prevent a later OCR variant from
+                    # recovering the time printed immediately after the date.
+                    if parsed_text and any(item.captured_time for item in parsed_text):
                         orientation_found_date = True
                         break
                 if orientation_found_date:
@@ -429,6 +473,7 @@ class HybridRecognizer:
         return sorted(
             unique.values(),
             key=lambda item: (
+                any(candidate.captured_time for candidate in self._parse(item.text)),
                 bool(self._parse(item.text)),
                 item.confidence,
             ),
@@ -499,8 +544,9 @@ class HybridRecognizer:
                 "prompt": (
                     "Inspect this old photograph for a camera-printed date stamp. "
                     "Read only the visible stamp, not the scene or existing metadata. "
-                    "Return the date in YYYY-MM-DD format. If the visible date is incomplete "
-                    "or no stamp is present, return NONE. Do not guess missing digits."
+                    "Return YYYY-MM-DD HH:MM:SS when a time is visible next to the date; "
+                    "otherwise return YYYY-MM-DD. If the visible date is incomplete or no "
+                    "stamp is present, return NONE. Never guess missing digits or time."
                 ),
                 "images": [encoded],
                 "stream": False,
