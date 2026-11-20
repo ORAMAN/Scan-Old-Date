@@ -289,6 +289,7 @@ class MainWindow(QMainWindow):
 
         self.table.setRowCount(0)
         self.row_meta.clear()
+        self.update_inline_preview()
         self.scan_button.setEnabled(False)
         self.status.setText("Сканирование выполняется…")
         self.worker = ScanWorker(root, self.config)
@@ -431,7 +432,13 @@ class MainWindow(QMainWindow):
 
             preview.thumbnail((560, 370), Image.Resampling.LANCZOS)
             self.preview_image_label.setText("")
-            self.preview_image_label.setPixmap(self._image_to_pixmap(preview))
+            preview_pixmap = self._image_to_pixmap(preview)
+            preview_pixmap = preview_pixmap.scaled(
+                self.preview_image_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.preview_image_label.setPixmap(preview_pixmap)
 
             for index, region in enumerate(diagnostics, start=1):
                 bbox = region.get("bbox")
