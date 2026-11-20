@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 from PIL import Image
@@ -46,6 +46,7 @@ def apply_date(
     path: str | Path,
     photo_date: date,
     config: dict,
+    photo_time: time | None = None,
 ) -> dict[str, str | bool]:
     path = Path(path)
     metadata_cfg = config["metadata"]
@@ -66,7 +67,8 @@ def apply_date(
             )
 
     default_time = config.get("scan", {}).get("default_time", "12:00:00")
-    stamp = datetime.combine(photo_date, datetime.strptime(default_time, "%H:%M:%S").time())
+    selected_time = photo_time or datetime.strptime(default_time, "%H:%M:%S").time()
+    stamp = datetime.combine(photo_date, selected_time)
     exif_value = stamp.strftime("%Y:%m:%d %H:%M:%S")
     backup_path = ""
 
