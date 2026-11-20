@@ -148,13 +148,13 @@ class StampDetector:
                 continue
 
             median_height = float(np.median([item[3] for item in group]))
-            pad_left = max(12, int(round(median_height * 2.2)))
-            pad_right = max(7, int(round(median_height * 1.2)))
+            pad_x = max(12, int(round(median_height * 2.2)))
+            pad_y = max(10, int(round(median_height * 0.9)))
             box = (
-                max(0, x1 - pad_left),
-                max(0, y1),
-                min(width, x2 + pad_right),
-                min(height, y2 + 4),
+                max(0, x1 - pad_x),
+                max(0, y1 - pad_y),
+                min(width, x2 + pad_x),
+                min(height, y2 + pad_y),
             )
             region = self._make_region(
                 rgb, "yellow-stamp-vertical-components", box, 0.96
@@ -200,18 +200,20 @@ class StampDetector:
             median_height = float(np.median([item[3] for item in group]))
             partial_at_right_edge = x2 >= width - 12 and span_x < width * 0.25
             if partial_at_right_edge:
-                # Small stamp fragments cut by the photo edge need a little more
-                # vertical context, but less unrelated background on their left.
+                # Keep every detected glyph. The photo boundary already truncates the
+                # right side; shifting x1 inward by a few pixels cropped the first glyph.
+                pad_x = max(10, int(round(median_height * 1.0)))
+                pad_y = max(10, int(round(median_height * 0.9)))
                 box = (
-                    min(width - 1, x1 + 4),
-                    max(0, y1 - 9),
+                    max(0, x1 - pad_x),
+                    max(0, y1 - pad_y),
                     width,
-                    min(height, y2 + 9),
+                    min(height, y2 + pad_y),
                 )
                 label = "yellow-stamp-horizontal-partial"
             else:
-                pad_x = max(7, int(round(median_height * 0.60)))
-                pad_y = max(3, int(round(median_height * 0.25)))
+                pad_x = max(10, int(round(median_height * 0.9)))
+                pad_y = max(8, int(round(median_height * 0.7)))
                 box = (
                     max(0, x1 - pad_x),
                     max(0, y1 - pad_y),
