@@ -74,6 +74,7 @@ class PhotoScanner:
                     ",".join(result.methods),
                     status,
                     "; ".join(details),
+                    selected.captured_time.isoformat() if selected and selected.captured_time else None,
                 )
                 results.append(result)
                 if on_result:
