@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from typing import Iterable
 
 
@@ -12,12 +12,13 @@ class ParsedDate:
     confidence: float
     source_text: str
     ambiguous: bool = False
+    captured_time: time | None = None
 
 
-# Some camera stamps have the time printed immediately after the date, with no space.
+# Camera stamps commonly attach the time directly to the date, e.g. 2009/08/0704:57PM.
 _TIME_SUFFIX = (
-    r"(?:\s*\d{1,2}[:.]\d{2}(?:[:.]\d{2})?"
-    r"(?:\s*[AP]M?)?)?"
+    r"(?:\s*(?P<hour>\d{1,2})[:.](?P<minute>\d{2})"
+    r"(?:[:.](?P<second>\d{2}))?\s*(?P<ampm>[AP]M?)?)?"
 )
 _YEAR_FIRST = re.compile(
     rf"(?<!\d)(20\d{{2}}|19\d{{2}})[./_\- ](\d{{1,2}})[./_\- ](\d{{1,2}}){_TIME_SUFFIX}(?!\d)",
@@ -36,8 +37,35 @@ _DAY_FIRST = re.compile(
 # Common compact LED camera stamp: M D 'YY, M-D-YY or M D YY.
 _LED_STAMP = re.compile(
     r"(?<!\d)(\d{1,2})(?!\d)[ ./_-]+(\d{1,2})(?!\d)"
-    r"\s*['’]?\s*(\d{2})(?!\d)"
+    r"\s*['’]?\s*(\d{2})" + _TIME_SUFFIX + r"(?!\d)",
+    re.IGNORECASE,
 )
+
+
+def _parse_captured_time(match: re.Match[str]) -> time | None:
+    hour_raw = match.groupdict().get("hour")
+    if hour_raw is None:
+        return None
+
+    hour = int(hour_raw)
+    minute = int(match.groupdict().get("minute") or 0)
+    second = int(match.groupdict().get("second") or 0)
+    ampm = (match.groupdict().get("ampm") or "").upper()
+
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        if ampm.startswith("P") and hour != 12:
+            hour += 12
+        elif ampm.startswith("A") and hour == 12:
+            hour = 0
+    elif not 0 <= hour <= 23:
+        return None
+
+    try:
+        return time(hour, minute, second)
+    except ValueError:
+        return None
 
 
 def parse_date_candidates(
@@ -53,17 +81,21 @@ def parse_date_candidates(
 
     for match in _YEAR_FIRST.finditer(cleaned):
         year, month, day = map(int, match.groups()[:3])
-        _append(found, year, month, day, match.group(), 0.96, min_year, max_year)
+        _append(
+            found, year, month, day, match.group(), 0.96, min_year, max_year,
+            _parse_captured_time(match),
+        )
 
     for match in _OCR_YEAR_FIRST.finditer(cleaned):
         year, month, day = map(int, match.groups()[:3])
-        _append(found, year, month, day, match.group(), 0.78, min_year, max_year)
+        _append(
+            found, year, month, day, match.group(), 0.78, min_year, max_year,
+            _parse_captured_time(match),
+        )
 
-    # Avoid parsing the same substring twice as both a generic and LED pattern.
+    # Avoid parsing the month/day portion of a year-first stamp as a compact LED date.
     led_spans: set[tuple[int, int]] = set()
     for match in _LED_STAMP.finditer(cleaned):
-        # Do not parse the month/day portion of YYYY/MM/DDhhmm as a separate
-        # compact MM/DD/YY camera date.
         prefix = cleaned[: match.start()]
         if (
             re.search(r"(?<!\d)(?:19|20)\d{2}[./_-]\s*$", prefix)
@@ -73,11 +105,12 @@ def parse_date_candidates(
             )
         ):
             continue
-        first, second, year_raw = map(int, match.groups())
+        first, second, year_raw = map(int, match.groups()[:3])
         year = _expand_year(year_raw)
         led_spans.add(match.span())
         _add_month_day_interpretations(
-            found, first, second, year, match.group(), 0.78, min_year, max_year
+            found, first, second, year, match.group(), 0.78, min_year, max_year,
+            _parse_captured_time(match),
         )
 
     for match in _DAY_FIRST.finditer(cleaned):
@@ -104,18 +137,24 @@ def parse_date_candidates(
             0.82,
             min_year,
             max_year,
+            _parse_captured_time(match),
         )
 
-    # Keep the strongest interpretation of each actual calendar date. Different
-    # OCR passes often return the same date with slightly different surrounding text.
-    unique: dict[date, ParsedDate] = {}
+    # Keep the strongest interpretation of each date/time pair. A read with a time
+    # must not be discarded merely because another OCR pass returned only the date.
+    unique: dict[tuple[date, time | None], ParsedDate] = {}
     for item in found:
-        current = unique.get(item.value)
+        key = (item.value, item.captured_time)
+        current = unique.get(key)
         if current is None or item.confidence > current.confidence:
-            unique[item.value] = item
+            unique[key] = item
     return sorted(
         unique.values(),
-        key=lambda item: (item.confidence, not item.ambiguous),
+        key=lambda item: (
+            item.confidence,
+            item.captured_time is not None,
+            not item.ambiguous,
+        ),
         reverse=True,
     )
 
@@ -135,6 +174,7 @@ def _add_month_day_interpretations(
     confidence: float,
     min_year: int,
     max_year: int,
+    captured_time: time | None = None,
 ) -> None:
     if not min_year <= year <= max_year:
         return
@@ -147,10 +187,12 @@ def _add_month_day_interpretations(
         if candidate not in interpretations:
             interpretations.append(candidate)
     if len(interpretations) == 1:
-        output.append(ParsedDate(interpretations[0], confidence, source, False))
+        output.append(
+            ParsedDate(interpretations[0], confidence, source, False, captured_time)
+        )
     elif len(interpretations) > 1:
         output.extend(
-            ParsedDate(item, min(0.50, confidence), source, True)
+            ParsedDate(item, min(0.50, confidence), source, True, captured_time)
             for item in interpretations
         )
 
@@ -164,11 +206,14 @@ def _append(
     confidence: float,
     min_year: int,
     max_year: int,
+    captured_time: time | None = None,
 ) -> None:
     if not min_year <= year <= max_year:
         return
     try:
-        output.append(ParsedDate(date(year, month, day), confidence, source, False))
+        output.append(
+            ParsedDate(date(year, month, day), confidence, source, False, captured_time)
+        )
     except ValueError:
         return
 
