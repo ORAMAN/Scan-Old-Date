@@ -83,7 +83,8 @@ class HybridRecognizer:
                             0.99,
                             item.confidence * 0.68
                             + read.confidence * 0.24
-                            + region.score * 0.08,
+                            + region.score * 0.08
+                            + (0.015 if item.captured_time else 0.0),
                         )
                         scored = ParsedDate(
                             item.value,
@@ -130,6 +131,10 @@ class HybridRecognizer:
                             for item in sorted(
                                 reads,
                                 key=lambda value: (
+                                    any(
+                                        candidate.captured_time
+                                        for candidate in self._parse(value.text)
+                                    ),
                                     bool(self._parse(value.text)),
                                     value.confidence,
                                 ),
@@ -139,6 +144,7 @@ class HybridRecognizer:
                         "dates": [
                             {
                                 "value": item.value.isoformat(),
+                                "time": item.captured_time.isoformat() if item.captured_time else None,
                                 "confidence": round(float(item.confidence), 3),
                                 "ambiguous": bool(item.ambiguous),
                                 "source_text": item.source_text,
@@ -445,8 +451,8 @@ class HybridRecognizer:
                         )
                     )
 
-                    # A calendar-valid date is stronger evidence than OCR's raw
-                    # confidence. Stop at the first valid full read for this crop.
+                    # Calendar-valid date and time are stronger evidence than raw
+                    # OCR confidence. Continue past date-only reads when possible.
                     parsed_text = self._parse(text)
                     # A date-only read must not prevent a later OCR variant from
                     # recovering the time printed immediately after the date.
